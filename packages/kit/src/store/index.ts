@@ -40,6 +40,7 @@ import networkReducer from './reducers/network';
 import settingsReducer from './reducers/settings';
 import statusReducer from './reducers/status';
 import walletReducer from './reducers/wallet';
+import swapReducer from './reducers/swap';
 
 const allReducers = combineReducers({
   autoUpdate: autoUpdateReducer,
@@ -53,6 +54,7 @@ const allReducers = combineReducers({
   dapp: dappReducer,
   data: dataReducer,
   discover: discoverReducer,
+  swap: swapReducer,
   counter,
 });
 

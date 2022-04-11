@@ -7,7 +7,6 @@ import { ListRenderItem } from 'react-native';
 import {
   Box,
   Center,
-  Dialog,
   Divider,
   Empty,
   Icon,
@@ -24,35 +23,41 @@ import { Text } from '@onekeyhq/components/src/Typography';
 import { Token } from '@onekeyhq/engine/src/types/token';
 import IconSearch from '@onekeyhq/kit/assets/3d_search.png';
 
-import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
-import { FormatBalance } from '../../components/Format';
-import { useDebounce, useManageTokens, useToast } from '../../hooks';
-import { useGeneral } from '../../hooks/redux';
-import { timeout } from '../../utils/helper';
+import backgroundApiProxy from '../../../../background/instance/backgroundApiProxy';
+import { FormatBalance } from '../../../../components/Format';
+import { useDebounce, useManageTokens, useToast } from '../../../../hooks';
+import { useGeneral } from '../../../../hooks/redux';
 
 import { useSearchTokens } from './hooks';
-import { ManageTokenRoutes, ManageTokenRoutesParams } from './types';
+import { ManageTokenRoutes } from './types';
+import { formatNumber } from '../../../../components/Format';
 
-import type { ValuedToken } from '../../store/typings';
+import type { ValuedToken } from '../../../../store/typings';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import {
+  ModalRoutes,
+  RootRoutes,
+  RootRoutesParams
+} from '@onekeyhq/kit/src/routes/types';
+
 type NavigationProps = NativeStackNavigationProp<
-  ManageTokenRoutesParams,
-  ManageTokenRoutes.Listing
+  RootRoutesParams,
+  RootRoutes.Root
 >;
 
 const isValidateAddr = (addr: string) => addr.length === 42;
 
 type HeaderTokensProps = {
   tokens: ValuedToken[];
-  topTokens: Token[];
-  onDelToken?: (token: Token) => void;
+  showTop50Label?: boolean;
+  onPress?: (token: ValuedToken) => void
 };
 
 const HeaderTokens: FC<HeaderTokensProps> = ({
   tokens,
-  topTokens,
-  onDelToken,
+  showTop50Label,
+  onPress
 }) => {
   const intl = useIntl();
   return (
@@ -67,7 +72,7 @@ const HeaderTokens: FC<HeaderTokensProps> = ({
           </Typography.Subheading>
           <Box mt="2" mb="6">
             {tokens.map((item, index) => (
-              <Box
+              <Pressable
                 key={item.tokenIdOnNetwork}
                 borderTopRadius={index === 0 ? '12' : undefined}
                 borderBottomRadius={
@@ -81,6 +86,7 @@ const HeaderTokens: FC<HeaderTokensProps> = ({
                 bg="surface-default"
                 borderTopColor="divider"
                 borderTopWidth={index !== 0 ? '1' : undefined}
+                onPress={() => onPress?.(item)}
               >
                 <Box display="flex" alignItems="center" flexDirection="row">
                   <Image
@@ -105,33 +111,39 @@ const HeaderTokens: FC<HeaderTokensProps> = ({
                       numberOfLines={2}
                       typography={{ sm: 'Body1Strong', md: 'Body2Strong' }}
                     >
-                      {item.symbol} ({item.name})
+                      {item.symbol}
                     </Text>
                     <Typography.Body2
                       maxW="56"
                       numberOfLines={1}
                       color="text-subdued"
                     >
-                      <FormatBalance
-                        balance={item?.balance ?? '0'}
-                        suffix={item.symbol}
-                        formatOptions={{ fixed: 6 }}
-                      />
+                      {item.name}
                     </Typography.Body2>
                   </Box>
                 </Box>
-                <IconButton
-                  name="TrashSolid"
-                  type="plain"
-                  circle
-                  onPress={() => onDelToken?.(item)}
-                />
-              </Box>
+                <Box
+                  display="flex"
+                  flexDirection="column"
+                  alignItems="flex-end"
+                >
+                  <Typography.Body2 numberOfLines={1} color="text-default">
+                    {formatNumber(item?.balance ?? '0', { fixed: 6 })}
+                  </Typography.Body2>
+                  <Typography.Body2 numberOfLines={1} color="text-subdued">
+                    $
+                    <FormatBalance
+                      balance={item?.balance ?? '0'}
+                      formatOptions={{ fixed: 6 }}
+                    />
+                  </Typography.Body2>
+                </Box>
+              </Pressable>
             ))}
           </Box>
         </Box>
       ) : null}
-      {topTokens.length ? (
+      { showTop50Label ? (
         <Typography.Subheading color="text-subdued" mb="2">
           {intl.formatMessage({
             id: 'form__top_50_tokens',
@@ -144,21 +156,21 @@ const HeaderTokens: FC<HeaderTokensProps> = ({
 };
 
 type HeaderProps = {
-  topTokens: Token[];
   tokens: ValuedToken[];
   keyword: string;
   terms?: string;
+  showTop50Label?: boolean;
   onChange: (keyword: string) => void;
-  onDelToken?: (token: Token) => void;
+  onPress?: (token: ValuedToken) => void
 };
 
 const Header: FC<HeaderProps> = ({
   tokens,
-  topTokens,
+  showTop50Label,
   keyword,
   terms,
   onChange,
-  onDelToken,
+  onPress,
 }) => {
   const intl = useIntl();
   return (
@@ -177,8 +189,8 @@ const Header: FC<HeaderProps> = ({
       {terms ? null : (
         <HeaderTokens
           tokens={tokens}
-          onDelToken={onDelToken}
-          topTokens={topTokens}
+          showTop50Label={showTop50Label}
+          onPress={onPress}
         />
       )}
     </Box>
@@ -223,7 +235,13 @@ const ListEmptyComponent: FC<ListEmptyComponentProps> = ({
         if (isValidateAddr(terms)) {
           params.address = terms;
         }
-        navigation.navigate(ManageTokenRoutes.CustomToken, params);
+        navigation.navigate(RootRoutes.Modal, {
+          screen: ModalRoutes.ManageToken,
+          params: {
+            screen: ManageTokenRoutes.CustomToken,
+            params
+          }
+        });
       }}
     />
   ) : null;
@@ -234,63 +252,15 @@ type ListingTokenProps = {
   isOwned?: boolean;
   borderTopRadius?: string;
   borderBottomRadius?: string;
+  onPress?: (item: ValuedToken) => void
 };
 
 const ListingToken: FC<ListingTokenProps> = ({
   item,
   borderTopRadius,
   borderBottomRadius,
-  isOwned,
+  onPress
 }) => {
-  const navigation = useNavigation<NavigationProps>();
-  const intl = useIntl();
-  const { info } = useToast();
-  const { activeAccount, activeNetwork } = useGeneral();
-  const { updateAccountTokens, updateTokens } = useManageTokens();
-  const onPress = useCallback(async () => {
-    if (activeAccount && activeNetwork) {
-      try {
-        await timeout(
-          backgroundApiProxy.engine.quickAddToken(
-            activeAccount?.id,
-            activeNetwork.network.id,
-            item.tokenIdOnNetwork,
-          ),
-          5000,
-        );
-      } catch (e) {
-        info(intl.formatMessage({ id: 'msg__failed_to_add_token' }));
-        return;
-      }
-      info(intl.formatMessage({ id: 'msg__token_added' }));
-      updateAccountTokens();
-      updateTokens();
-    }
-  }, [
-    intl,
-    activeAccount,
-    activeNetwork,
-    info,
-    updateAccountTokens,
-    updateTokens,
-    item.tokenIdOnNetwork,
-  ]);
-  const onDetail = useCallback(() => {
-    const {
-      name,
-      symbol,
-      tokenIdOnNetwork: address,
-      decimals: decimal,
-      logoURI,
-    } = item;
-    navigation.push(ManageTokenRoutes.AddToken, {
-      name,
-      symbol,
-      address,
-      decimal,
-      logoURI,
-    });
-  }, [navigation, item]);
   return (
     <Pressable
       borderTopRadius={borderTopRadius}
@@ -303,7 +273,7 @@ const ListingToken: FC<ListingTokenProps> = ({
       bg="surface-default"
       overflow="hidden"
       key={item.tokenIdOnNetwork}
-      onPress={onDetail}
+      onPress={() => onPress?.(item)}
     >
       <Box display="flex" alignItems="center" flexDirection="row">
         <Image
@@ -329,38 +299,39 @@ const ListingToken: FC<ListingTokenProps> = ({
             numberOfLines={2}
             color={item.balance ? 'text-disabled' : 'text-default'}
           >
-            {item.symbol}({item.name})
+            {item.symbol}
           </Text>
           <Typography.Body2
             numberOfLines={1}
             color={item.balance ? 'text-disabled' : 'text-subdued'}
           >
-            {utils.shortenAddress(item.tokenIdOnNetwork)}
+            {item.name}
           </Typography.Body2>
         </Box>
       </Box>
-      <Box>
-        {isOwned ? (
-          <Box p={2}>
-            <Icon name="CheckSolid" color="interactive-disabled" />
-          </Box>
-        ) : (
-          <IconButton
-            name="PlusSolid"
-            type="plain"
-            circle
-            p="4"
-            onPromise={onPress}
+      <Box display="flex" flexDirection="column" alignItems="flex-end">
+        <Typography.Body2 numberOfLines={1} color="text-default">
+          {formatNumber(item?.balance ?? '0', { fixed: 6 })}
+        </Typography.Body2>
+        <Typography.Body2 numberOfLines={1} color="text-subdued">
+          $
+          <FormatBalance
+            balance={item?.balance ?? '0'}
+            formatOptions={{ fixed: 6 }}
           />
-        )}
+        </Typography.Body2>
       </Box>
     </Pressable>
   );
 };
 
-export const Listing: FC = () => {
+type ListingProps = {
+  onPress?: (token: ValuedToken) => void,
+  excluded?: ValuedToken
+}
+
+export const Listing: FC<ListingProps> = ({ onPress, excluded }) => {
   const intl = useIntl();
-  const navigation = useNavigation<NavigationProps>();
   const {
     accountTokens,
     accountTokensMap,
@@ -369,62 +340,35 @@ export const Listing: FC = () => {
     updateAccountTokens,
   } = useManageTokens();
   const [keyword, setKeyword] = useState<string>('');
-  const [mylist, setMylist] = useState<Token[]>([]);
   const searchTerm = useDebounce(keyword, 1000);
 
-  const { activeNetwork, activeAccount } = useGeneral();
+  const { activeNetwork } = useGeneral();
   const { loading, searchedTokens } = useSearchTokens(
     searchTerm,
     keyword,
     activeNetwork?.network.id,
   );
 
-  const [visible, setVisible] = useState(false);
-  const [toDeletedToken, setToDeletedToken] = useState<Token>();
-
-  useEffect(() => {
-    setMylist(accountTokens.filter((i) => i.tokenIdOnNetwork));
-  }, [accountTokens]);
-
-  const onToggleDeleteDialog = useCallback((token?: Token) => {
-    if (token) {
-      setToDeletedToken(token);
-      setVisible(true);
-    } else {
-      setVisible(false);
-    }
-  }, []);
-
-  const onDelete = useCallback(async () => {
-    if (activeAccount && toDeletedToken) {
-      await backgroundApiProxy.engine.removeTokenFromAccount(
-        activeAccount.id,
-        toDeletedToken?.id,
-      );
-    }
-    onToggleDeleteDialog(undefined);
-    updateTokens();
-    updateAccountTokens();
-  }, [
-    activeAccount,
-    toDeletedToken,
-    updateTokens,
-    updateAccountTokens,
-    onToggleDeleteDialog,
-  ]);
-
   useFocusEffect(updateTokens);
   useFocusEffect(updateAccountTokens);
 
+  const headerTokens = useMemo(() => {
+    return accountTokens.filter(i => i.tokenIdOnNetwork !== excluded?.tokenIdOnNetwork)
+  }, [accountTokens, excluded])
+
   const flatListData = useMemo(
-    () => (searchTerm ? searchedTokens : allTokens),
-    [searchTerm, searchedTokens, allTokens],
+    () => {
+      const tokens = searchTerm ? searchedTokens : allTokens;
+      return tokens.filter(i => i.tokenIdOnNetwork !== excluded?.tokenIdOnNetwork)
+    },
+    [searchTerm, searchedTokens, allTokens, excluded],
   );
 
   const renderItem: ListRenderItem<ValuedToken> = useCallback(
     ({ item, index }) => (
       <ListingToken
         item={item}
+        onPress={onPress}
         borderTopRadius={index === 0 ? '12' : undefined}
         borderBottomRadius={
           index === flatListData.length - 1 ? '12' : undefined
@@ -438,18 +382,10 @@ export const Listing: FC = () => {
   return (
     <>
       <Modal
-        header={intl.formatMessage({
-          id: 'title__manage_tokens',
-          defaultMessage: 'Manage Tokens',
-        })}
+        header={intl.formatMessage({ id: 'title__select_a_token' })}
         height="560px"
-        headerDescription={activeNetwork?.network.shortName}
+        footer={null}
         hidePrimaryAction
-        onSecondaryActionPress={() => {
-          navigation.navigate(ManageTokenRoutes.CustomToken);
-        }}
-        secondaryActionProps={{ type: 'basic', leftIconName: 'PlusOutline' }}
-        secondaryActionTranslationId="action__add_custom_tokens"
         flatListProps={{
           data: flatListData,
           // @ts-ignore
@@ -462,35 +398,13 @@ export const Listing: FC = () => {
           ),
           ListHeaderComponent: (
             <Header
-              topTokens={allTokens}
-              tokens={mylist}
+              showTop50Label={allTokens.length > 0}
+              tokens={headerTokens}
               keyword={keyword}
               terms={searchTerm}
               onChange={(text) => setKeyword(text)}
-              onDelToken={(token) => onToggleDeleteDialog(token)}
+              onPress={onPress}
             />
-          ),
-        }}
-      />
-      <Dialog
-        visible={visible}
-        onClose={() => onToggleDeleteDialog(undefined)}
-        footerButtonProps={{
-          primaryActionTranslationId: 'action__delete',
-          primaryActionProps: { type: 'destructive', onPromise: onDelete },
-        }}
-        contentProps={{
-          iconType: 'danger',
-          title: intl.formatMessage({
-            id: 'modal__delete_this_token',
-            defaultMessage: 'Delete this token?',
-          }),
-          content: intl.formatMessage(
-            {
-              id: 'modal__delete_this_token_desc',
-              defaultMessage: '{token} will be removed from my tokens',
-            },
-            { token: toDeletedToken?.name },
           ),
         }}
       />

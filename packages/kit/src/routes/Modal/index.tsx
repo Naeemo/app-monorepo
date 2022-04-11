@@ -98,6 +98,7 @@ import WatchedAccountModal, {
   WatchedAccountModalRoutes,
   WatchedAccountRoutesParams,
 } from './WatchedAccount';
+import SwapModal from './Swap'
 
 import type { NavigatorScreenParams } from '@react-navigation/native';
 
@@ -214,6 +215,10 @@ const modalStackScreenList = [
   {
     name: ModalRoutes.Discover,
     component: DiscoverModal,
+  },
+  {
+    name: ModalRoutes.Swap,
+    component: SwapModal,
   },
 ];
 
