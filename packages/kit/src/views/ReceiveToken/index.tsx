@@ -13,9 +13,11 @@ import {
   QRCode,
   Text,
   Typography,
+  useIsVerticalLayout,
   useThemeValue,
 } from '@onekeyhq/components';
 import { copyToClipboard } from '@onekeyhq/components/src/utils/ClipboardUtils';
+import qrcodeLogo from '@onekeyhq/kit/assets/qrcode_logo.png';
 
 import { useToast } from '../../hooks/useToast';
 
@@ -33,6 +35,7 @@ const ReceiveToken = () => {
   const route = useRoute<NavigationProps>();
 
   const { address, name } = route.params;
+  const isSmallScreen = useIsVerticalLayout();
 
   const copyAddressToClipboard = useCallback(() => {
     copyToClipboard(address);
@@ -60,14 +63,19 @@ const ReceiveToken = () => {
 
                 <Box
                   mt="16px"
-                  padding="16px"
-                  borderWidth="1px"
-                  borderRadius="12px"
-                  bgColor="surface-default"
-                  borderColor={borderColor}
-                  width="192px"
+                  borderRadius="3xl"
+                  bgColor="white"
+                  p={isSmallScreen ? '16px' : '11px'}
+                  shadow="depth.4"
                 >
-                  <QRCode value={address} size={160} />
+                  <QRCode
+                    value={address}
+                    logo={qrcodeLogo}
+                    size={isSmallScreen ? 264 : 186}
+                    logoSize={isSmallScreen ? 57 : 40}
+                    logoMargin={isSmallScreen ? 4 : 2}
+                    logoBackgroundColor="white"
+                  />
                 </Box>
               </Box>
               <Row
