@@ -13,7 +13,7 @@ import {
   Button,
   Form,
   Modal,
-  Spinner,
+  NumberInput,
   Typography,
   useForm,
   useFormState,
@@ -393,10 +393,11 @@ const Transaction = () => {
                 }}
                 // helpText="0 USD"
               >
-                <Form.Input
+                <NumberInput
                   maxLength={40}
                   w="100%"
                   keyboardType="numeric"
+                  decimal={8}
                   rightCustomElement={
                     <>
                       <Typography.Body2 mr={4} color="text-subdued">
