@@ -1,162 +1,253 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 
-import { Column, Row } from 'native-base';
+import { useNavigation } from '@react-navigation/native';
 import { useIntl } from 'react-intl';
 
-import {
-  Icon,
-  Pressable,
-  Spinner,
-  Text,
-  Typography,
-} from '@onekeyhq/components';
-import { IFeeInfoPayload } from '@onekeyhq/engine/src/types/vault';
+import { Box, Icon, Pressable, Spinner, Text } from '@onekeyhq/components';
+import { IFeeInfoPayload } from '@onekeyhq/engine/src/vaults/types';
 
-import { FormatBalance, FormatCurrencyNative } from '../../components/Format';
-import useNavigation from '../../hooks/useNavigation';
+import { FormatCurrencyNative } from '../../components/Format';
+import { useActiveWalletAccount } from '../../hooks/redux';
 
 import { FeeSpeedLabel } from './SendEditFee';
 import { TxTitleDetailView } from './TxTitleDetailView';
 import { SendRoutes, SendRoutesParams } from './types';
 
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { StackNavigationProp } from '@react-navigation/stack';
 
-type NavigationProps = NativeStackNavigationProp<
+type NavigationProps = StackNavigationProp<
   SendRoutesParams,
   SendRoutes.SendConfirm
 >;
 
+export type IFeeInfoInputProps = {
+  encodedTx: any;
+  feeInfoPayload: IFeeInfoPayload | null;
+  loading?: boolean;
+  editable?: boolean;
+  renderChildren: ({ isHovered }: { isHovered: boolean }) => any;
+  autoNavigateToEdit?: boolean;
+};
 function FeeInfoInput({
   encodedTx,
   feeInfoPayload,
   loading,
   renderChildren,
   editable,
-  backRouteName,
-}: {
-  encodedTx: any;
-  feeInfoPayload: IFeeInfoPayload | null;
-  loading?: boolean;
-  editable?: boolean;
-  backRouteName?: keyof SendRoutesParams;
-  renderChildren: ({ isHovered }: { isHovered: boolean }) => any;
-}) {
+  autoNavigateToEdit,
+}: IFeeInfoInputProps) {
   const navigation = useNavigation<NavigationProps>();
-
-  return (
-    <Pressable
-      disabled={!feeInfoPayload || loading || !editable}
-      onPress={() => {
-        if (loading) {
-          return;
-        }
-        navigation.navigate(SendRoutes.SendEditFee, {
-          backRouteName: backRouteName ?? SendRoutes.SendConfirm,
+  const disabled = loading || !editable || !encodedTx;
+  const navigateToEdit = useCallback(
+    ({ replace = false }: { replace?: boolean } = {}) => {
+      if (disabled) {
+        return;
+      }
+      if (replace) {
+        navigation.replace(SendRoutes.SendEditFee, {
           encodedTx,
           feeInfoSelected: feeInfoPayload?.selected,
+          autoConfirmAfterFeeSaved: autoNavigateToEdit,
         });
-      }}
-    >
+      } else {
+        navigation.navigate({
+          // merge: true,
+          // headerLeft: null,
+          name: SendRoutes.SendEditFee,
+          params: {
+            encodedTx,
+            feeInfoSelected: feeInfoPayload?.selected,
+            autoConfirmAfterFeeSaved: autoNavigateToEdit,
+          },
+        });
+      }
+    },
+    [
+      disabled,
+      encodedTx,
+      feeInfoPayload?.selected,
+      autoNavigateToEdit,
+      navigation,
+    ],
+  );
+
+  useEffect(() => {
+    if (autoNavigateToEdit) {
+      // replace not working
+      navigateToEdit({ replace: true });
+    }
+  }, [autoNavigateToEdit, navigateToEdit]);
+
+  return (
+    <Pressable disabled={disabled} onPress={() => navigateToEdit()}>
       {renderChildren}
     </Pressable>
   );
 }
 
+function useNetworkFeeInfoEditable() {
+  const { network } = useActiveWalletAccount();
+  return Boolean(network?.settings?.feeInfoEditable);
+}
+
+const FeeInfoInputContainer = React.memo((props: IFeeInfoInputProps) => {
+  const networkFeeInfoEditable = useNetworkFeeInfoEditable();
+  const editable = networkFeeInfoEditable && props.editable;
+  return <FeeInfoInput {...props} editable={editable} />;
+});
+FeeInfoInputContainer.displayName = 'FeeInfoInputContainer';
+
 function FeeInfoInputForTransfer({
   encodedTx,
   feeInfoPayload,
   loading,
+  editable,
 }: {
   encodedTx: any;
   feeInfoPayload: IFeeInfoPayload | null;
   loading: boolean;
+  editable?: boolean;
 }) {
-  const renderChildren = useCallback(
-    ({ isHovered }) => {
-      let totalDetailText = `${feeInfoPayload?.current?.total ?? '-'} ${
-        feeInfoPayload?.info?.symbol ?? ''
-      }`;
-      const isPreset = feeInfoPayload?.selected?.type === 'preset';
-      if (isPreset) {
-        totalDetailText = `(${totalDetailText})`;
-      }
-      let icon = null;
-      if (feeInfoPayload) {
-        icon = <Icon size={20} name="PencilSolid" />;
-      }
-      if (loading) {
-        icon = <Spinner size="sm" />;
-      }
+  const intl = useIntl();
+  const isPreset = feeInfoPayload?.selected?.type === 'preset';
+  const showFirstTimeHint = useRef(true);
+  const networkFeeInfoEditable = useNetworkFeeInfoEditable();
+
+  const icon: React.ReactElement | null = useMemo(() => {
+    if (!encodedTx) {
+      return null;
+    }
+    if (loading) {
+      return <Spinner size="sm" />;
+    }
+    if (feeInfoPayload && editable && networkFeeInfoEditable) {
+      return <Icon size={20} name="PencilSolid" />;
+    }
+    return null;
+  }, [editable, encodedTx, feeInfoPayload, loading, networkFeeInfoEditable]);
+
+  const title = useMemo(() => {
+    if (!encodedTx || !feeInfoPayload) {
+      return null;
+    }
+    const totalNative = feeInfoPayload?.current?.totalNative ?? '0';
+
+    const typography = {
+      sm: 'Body1Strong',
+      md: 'Body2Strong',
+    } as any;
+
+    if (isPreset) {
       return (
-        // fee TODO encodedTxRef.current -> bg -> unsignedTx -> gasLimit -> feeInfo
-        <Row
-          justifyContent="space-between"
-          alignItems="center"
-          bgColor={isHovered ? 'surface-hovered' : 'surface-default'}
-          borderColor="border-default"
-          borderWidth="1px"
-          borderRadius="12px"
-          paddingX="12px"
-          paddingY="8px"
-        >
-          <Column>
-            <Row>
-              <Text
-                typography={{
-                  sm: 'Body1Strong',
-                  md: 'Body2Strong',
-                }}
-              >
-                {isPreset ? (
-                  <FeeSpeedLabel index={feeInfoPayload?.selected?.preset} />
-                ) : null}{' '}
-                {totalDetailText}
-              </Text>
-            </Row>
-            <Row>
-              <FormatBalance
-                formatOptions={{
-                  fixed: feeInfoPayload?.info.nativeDecimals,
-                  unit: feeInfoPayload?.info.decimals,
-                }}
-                balance={feeInfoPayload?.current?.total ?? ''}
-                suffix={feeInfoPayload?.info.nativeSymbol}
-                render={(ele) => (
-                  <Typography.Body2 mt={1} color="text-subdued">
-                    {!feeInfoPayload?.current?.total ? '-' : ele}
-                  </Typography.Body2>
-                )}
-              />
-            </Row>
-            <Row>
-              <FormatCurrencyNative
-                value={feeInfoPayload?.current?.totalNative}
-                render={(ele) => (
-                  <Typography.Body2 mt={1} color="text-subdued">
-                    {!feeInfoPayload?.current?.totalNative ? '-' : ele}
-                  </Typography.Body2>
-                )}
-              />
-            </Row>
-
-            {/* <Typography.Body2 color="text-subdued">
-                          0.001694 ETH ~ 0.001977 ETH
-                        </Typography.Body2> */}
-            {/* <Typography.Body2 color="text-subdued">
-                          3 min
-                        </Typography.Body2> */}
-          </Column>
-
-          {icon}
-        </Row>
+        <>
+          <Text typography={typography}>
+            <FeeSpeedLabel index={feeInfoPayload?.selected?.preset} />{' '}
+            <FormatCurrencyNative
+              value={totalNative}
+              render={(ele) => <>(~ {ele})</>}
+            />
+          </Text>
+        </>
       );
-    },
-    [feeInfoPayload, loading],
+    }
+    // TODO fallback to native value if fiat price is null
+    return (
+      <Text typography={typography}>
+        <FormatCurrencyNative
+          value={totalNative}
+          render={(ele) => <>{ele}</>}
+        />
+      </Text>
+    );
+  }, [encodedTx, feeInfoPayload, isPreset]);
+
+  const subTitle = useMemo(() => {
+    if (!isPreset || !encodedTx || !feeInfoPayload) {
+      return null;
+    }
+    let feeSpeedTime = '';
+    if (feeInfoPayload?.selected?.type === 'preset') {
+      if (feeInfoPayload?.selected?.preset === '0')
+        feeSpeedTime = intl.formatMessage({
+          id: 'content__maybe_in_30s',
+        });
+      if (feeInfoPayload?.selected?.preset === '1')
+        feeSpeedTime = intl.formatMessage({
+          id: 'content__likely_less_than_15s',
+        });
+      if (feeInfoPayload?.selected?.preset === '2')
+        feeSpeedTime = intl.formatMessage({
+          id: 'content__very_likely_less_than_15s',
+        });
+    }
+
+    return (
+      <Text color="text-subdued" flex={1}>
+        {feeSpeedTime}
+      </Text>
+    );
+  }, [encodedTx, feeInfoPayload, intl, isPreset]);
+
+  const loadingView = useMemo(
+    () => (
+      <Text color="text-subdued" flex={1}>
+        {intl.formatMessage({ id: 'content__calculate_fee' })}
+      </Text>
+    ),
+    [intl],
+  );
+  const hint = useMemo(() => {
+    let text = '';
+    if (!feeInfoPayload && showFirstTimeHint.current) {
+      showFirstTimeHint.current = false;
+      text = intl.formatMessage({ id: 'content__calculate_fee' });
+    }
+    if (text) {
+      return (
+        <Text color="text-subdued" flex={1}>
+          {text}
+        </Text>
+      );
+    }
+    if (!title && !subTitle) {
+      return loadingView;
+    }
+    return null;
+  }, [feeInfoPayload, intl, loadingView, title, subTitle]);
+
+  const renderChildren = useCallback(
+    ({ isHovered }) => (
+      // fee TODO encodedTxRef.current -> bg -> unsignedTx -> gasLimit -> feeInfo
+      <Box
+        justifyContent="space-between"
+        alignItems="center"
+        flexDirection="row"
+        bgColor={isHovered ? 'surface-hovered' : 'surface-default'}
+        borderColor="border-default"
+        borderWidth="1px"
+        borderRadius="12px"
+        paddingX="12px"
+        paddingY="8px"
+      >
+        <Box flex={1}>
+          {loading ? (
+            loadingView
+          ) : (
+            <>
+              {title}
+              {subTitle}
+              {hint}
+            </>
+          )}
+        </Box>
+        {icon}
+      </Box>
+    ),
+    [hint, icon, loading, loadingView, subTitle, title],
   );
   return (
-    <FeeInfoInput
-      editable
-      backRouteName={SendRoutes.Send}
+    <FeeInfoInputContainer
+      editable={editable}
       encodedTx={encodedTx}
       feeInfoPayload={feeInfoPayload}
       loading={loading}
@@ -177,32 +268,48 @@ function FeeInfoInputForConfirm({
   editable?: boolean;
 }) {
   const intl = useIntl();
+  const networkFeeInfoEditable = useNetworkFeeInfoEditable();
 
   const renderChildren = useCallback(
-    ({ isHovered }) => (
-      <TxTitleDetailView
-        isHovered={isHovered}
-        arrow={editable && !loading && !!feeInfoPayload}
-        title={`${intl.formatMessage({
-          id: 'content__fee',
-        })}(${intl.formatMessage({ id: 'content__estimated' })})`}
-        detail={
-          loading ? (
-            <Spinner />
-          ) : (
-            `${feeInfoPayload?.current?.totalNative || '-'} ${
-              feeInfoPayload?.info?.nativeSymbol || ''
-            }`
-          )
-        }
-      />
-    ),
-    [editable, feeInfoPayload, intl, loading],
+    ({ isHovered }) => {
+      let totalFeeInNative = feeInfoPayload?.current?.totalNative || '-';
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      if (!editable && encodedTx.totalFeeInNative) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        totalFeeInNative = encodedTx.totalFeeInNative;
+      }
+      return (
+        <TxTitleDetailView
+          isHovered={isHovered}
+          arrow={
+            editable && networkFeeInfoEditable && !loading && !!feeInfoPayload
+          }
+          title={`${intl.formatMessage({
+            id: 'content__fee',
+          })}(${intl.formatMessage({ id: 'content__estimated' })})`}
+          detail={
+            loading ? (
+              <Spinner />
+            ) : (
+              `${totalFeeInNative} ${feeInfoPayload?.info?.nativeSymbol || ''}`
+            )
+          }
+        />
+      );
+    },
+    [
+      editable,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      encodedTx.totalFeeInNative,
+      feeInfoPayload,
+      intl,
+      loading,
+      networkFeeInfoEditable,
+    ],
   );
   return (
-    <FeeInfoInput
+    <FeeInfoInputContainer
       editable={editable}
-      backRouteName={SendRoutes.SendConfirm}
       encodedTx={encodedTx}
       feeInfoPayload={feeInfoPayload}
       loading={loading}
@@ -211,4 +318,35 @@ function FeeInfoInputForConfirm({
   );
 }
 
-export { FeeInfoInput, FeeInfoInputForTransfer, FeeInfoInputForConfirm };
+function FeeInfoInputForSpeedUpOrCancel({
+  encodedTx,
+  feeInfoPayload,
+  loading,
+  editable,
+}: {
+  encodedTx: any;
+  feeInfoPayload: IFeeInfoPayload | null;
+  loading?: boolean;
+  editable?: boolean;
+}) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const renderChildren = useCallback(({ isHovered }) => null, []);
+  return (
+    <FeeInfoInputContainer
+      editable={editable}
+      encodedTx={encodedTx}
+      feeInfoPayload={feeInfoPayload}
+      loading={loading}
+      renderChildren={renderChildren}
+      autoNavigateToEdit
+    />
+  );
+}
+
+export {
+  FeeInfoInput,
+  FeeInfoInputContainer,
+  FeeInfoInputForTransfer,
+  FeeInfoInputForConfirm,
+  FeeInfoInputForSpeedUpOrCancel,
+};

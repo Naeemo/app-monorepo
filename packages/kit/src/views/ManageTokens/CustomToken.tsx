@@ -8,14 +8,15 @@ import {
   KeyboardDismissView,
   Modal,
   useForm,
+  useToast,
 } from '@onekeyhq/components';
+import { useIsVerticalLayout } from '@onekeyhq/components/src/Provider/hooks';
 import type { Token } from '@onekeyhq/engine/src/types/token';
 
 import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
 import { useDebounce } from '../../hooks';
-import { useActiveWalletAccount } from '../../hooks/redux';
+import { useActiveWalletAccount, useGetNetwork } from '../../hooks/redux';
 import { useManageTokens } from '../../hooks/useManageTokens';
-import { useToast } from '../../hooks/useToast';
 
 import { ManageTokenRoutes, ManageTokenRoutesParams } from './types';
 
@@ -34,18 +35,20 @@ type AddCustomTokenValues = {
 
 export const AddCustomToken: FC<NavigationProps> = ({ route }) => {
   const address = route.params?.address;
+  const networkId = route.params?.networkId;
   const intl = useIntl();
   const toast = useToast();
   const navigation = useNavigation();
   const [isSearching, setSearching] = useState(false);
   const [inputDisabled, setInputDisabled] = useState(false);
-  const { account: activeAccount, network: activeNetwork } =
+  const { account: activeAccount, network: defaultNetwork } =
     useActiveWalletAccount();
+  const activeNetwork = useGetNetwork(networkId ?? null) ?? defaultNetwork;
   const { accountTokensMap } = useManageTokens();
+  const isSmallScreen = useIsVerticalLayout();
 
   const helpTip = intl.formatMessage({
     id: 'form__searching_token',
-    defaultMessage: 'Searching Token...',
   });
 
   const {
@@ -121,10 +124,10 @@ export const AddCustomToken: FC<NavigationProps> = ({ route }) => {
     async function doQuery() {
       const trimedAddress = debouncedAddress.trim();
       if (
-        trimedAddress.length === 42 &&
         !accountTokensMap.has(trimedAddress.toLowerCase()) &&
         activeAccount &&
-        activeNetwork
+        activeNetwork &&
+        trimedAddress
       ) {
         let preResult;
         setSearching(true);
@@ -139,6 +142,9 @@ export const AddCustomToken: FC<NavigationProps> = ({ route }) => {
           } else {
             onSearch(undefined);
           }
+        } catch (e) {
+          console.error(e);
+          onSearch(undefined);
         } finally {
           setSearching(false);
         }
@@ -186,11 +192,12 @@ export const AddCustomToken: FC<NavigationProps> = ({ route }) => {
                 id: 'form__field_is_required',
               }),
               validate: (value) => {
-                if (value.length !== 42) {
-                  return intl.formatMessage({
-                    id: 'msg__wrong_address_format',
-                  });
-                }
+                // TODO validator.validateTokenAddress
+                // if (value.length !== 42) {
+                //   return intl.formatMessage({
+                //     id: 'msg__wrong_address_format',
+                //   });
+                // }
                 if (accountTokensMap.has(value.toLowerCase())) {
                   return intl.formatMessage({
                     id: 'msg__token_already_existed',
@@ -220,7 +227,10 @@ export const AddCustomToken: FC<NavigationProps> = ({ route }) => {
             defaultValue=""
             control={control}
           >
-            <Form.Input isDisabled={inputDisabled} />
+            <Form.Input
+              size={isSmallScreen ? 'xl' : 'default'}
+              isDisabled={inputDisabled}
+            />
           </Form.Item>
           <Form.Item
             name="decimal"
@@ -236,7 +246,10 @@ export const AddCustomToken: FC<NavigationProps> = ({ route }) => {
               }),
             }}
           >
-            <Form.Input isDisabled={inputDisabled} />
+            <Form.Input
+              size={isSmallScreen ? 'xl' : 'default'}
+              isDisabled={inputDisabled}
+            />
           </Form.Item>
         </Form>
       </KeyboardDismissView>

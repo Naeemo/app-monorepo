@@ -1,4 +1,4 @@
-import React, { FC, useCallback, useEffect, useState } from 'react';
+import React, { FC, useCallback, useEffect, useRef, useState } from 'react';
 
 import { useNavigation } from '@react-navigation/core';
 import { useIntl } from 'react-intl';
@@ -6,23 +6,21 @@ import { useIntl } from 'react-intl';
 import {
   Box,
   Button,
+  Center,
   Form,
   KeyboardDismissView,
   Modal,
   Typography,
   useForm,
+  useToast,
 } from '@onekeyhq/components';
 import { LocaleIds } from '@onekeyhq/components/src/locale';
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
 import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
 import LocalAuthenticationButton from '../../components/LocalAuthenticationButton';
-import { useLocalAuthentication, useToast } from '../../hooks';
-import {
-  useAppDispatch,
-  useData,
-  useSettings,
-  useStatus,
-} from '../../hooks/redux';
+import { useLocalAuthentication } from '../../hooks';
+import { useAppDispatch, useAppSelector, useData } from '../../hooks/redux';
 import { setEnableLocalAuthentication } from '../../store/reducers/settings';
 import { savePassword } from '../../utils/localAuthentication';
 
@@ -109,9 +107,11 @@ const EnterPassword: FC<EnterPasswordProps> = ({ onNext }) => {
             defaultMessage: 'Continue',
           })}
         </Button>
-        <Box display="flex" justifyContent="center" alignItems="center">
-          <LocalAuthenticationButton onOk={onNext} />
-        </Box>
+        {platformEnv.isNative ? (
+          <Box display="flex" justifyContent="center" alignItems="center">
+            <LocalAuthenticationButton onOk={onNext} />
+          </Box>
+        ) : null}
       </Form>
     </KeyboardDismissView>
   );
@@ -125,13 +125,17 @@ type PasswordsFieldValues = {
 
 const SetNewPassword: FC<{ oldPassword: string }> = ({ oldPassword }) => {
   const intl = useIntl();
-  const toast = useToast();
-  const { authenticationType } = useStatus();
-  const { enableLocalAuthentication } = useSettings();
-  const { isOk } = useLocalAuthentication();
-  const dispatch = useAppDispatch();
-  const { serviceApp } = backgroundApiProxy;
+  const [attention, showAttention] = useState(false);
   const navigation = useNavigation<NavigationProps>();
+  const dispatch = useAppDispatch();
+  const toast = useToast();
+  const ref = useRef({ unmount: false });
+  const authenticationType = useAppSelector((s) => s.status.authenticationType);
+  const enableLocalAuthentication = useAppSelector(
+    (s) => s.settings.enableLocalAuthentication,
+  );
+  const { isOk } = useLocalAuthentication();
+
   const {
     control,
     handleSubmit,
@@ -143,14 +147,25 @@ const SetNewPassword: FC<{ oldPassword: string }> = ({ oldPassword }) => {
     defaultValues: {
       password: '',
       confirmPassword: '',
-      withEnableAuthentication: true,
     },
     mode: 'onChange',
   });
+
+  const addAttention = useCallback(() => {
+    setTimeout(() => {
+      if (ref.current.unmount) return;
+      showAttention(true);
+    }, 2 * 1000);
+  }, []);
+
   const onSubmit = useCallback(
     async (values: PasswordsFieldValues) => {
       try {
-        await serviceApp.updatePassword(oldPassword, values.password);
+        addAttention();
+        await backgroundApiProxy.serviceApp.updatePassword(
+          oldPassword,
+          values.password,
+        );
       } catch (e) {
         const errorKey = (e as { key: LocaleIds }).key;
         toast.show({ title: intl.formatMessage({ id: errorKey }) });
@@ -185,9 +200,9 @@ const SetNewPassword: FC<{ oldPassword: string }> = ({ oldPassword }) => {
       toast,
       intl,
       oldPassword,
-      serviceApp,
       dispatch,
       enableLocalAuthentication,
+      addAttention,
     ],
   );
 
@@ -207,6 +222,13 @@ const SetNewPassword: FC<{ oldPassword: string }> = ({ oldPassword }) => {
       setValue('confirmPassword', confirmPassword);
     }
   }, [watchedPassword, setValue]);
+
+  useEffect(
+    () => () => {
+      ref.current.unmount = true;
+    },
+    [],
+  );
 
   const text =
     authenticationType === 'FACIAL'
@@ -302,7 +324,11 @@ const SetNewPassword: FC<{ oldPassword: string }> = ({ oldPassword }) => {
           />
         </Form.Item>
         {isOk && !oldPassword ? (
-          <Form.Item name="withEnableAuthentication" control={control}>
+          <Form.Item
+            name="withEnableAuthentication"
+            defaultValue={isOk}
+            control={control}
+          >
             <Form.CheckBox
               title={intl.formatMessage(
                 { id: 'content__authentication_with' },
@@ -324,6 +350,13 @@ const SetNewPassword: FC<{ oldPassword: string }> = ({ oldPassword }) => {
             defaultMessage: 'Continue',
           })}
         </Button>
+        {attention ? (
+          <Center>
+            <Typography.Body2 color="text-subdued">
+              {intl.formatMessage({ id: 'content__change_password_attention' })}
+            </Typography.Body2>
+          </Center>
+        ) : null}
       </Form>
     </KeyboardDismissView>
   );

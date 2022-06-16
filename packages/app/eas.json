@@ -4,17 +4,16 @@
   },
   "build": {
     "base": {
-      "node": "16.10.0",
       "yarn": "1.18.0",
       "android": {
-        "image": "ubuntu-20.04-jdk-8-ndk-r21e",
+        "image": "ubuntu-20.04-jdk-11-ndk-r21e",
         "env": {
           "PLATFORM": "android",
           "OTA_UPDATE_ENABLE": "false"
         }
       },
       "ios": {
-        "image": "macos-big-sur-11.4-xcode-13.0",
+        "image": "macos-monterey-12.3-xcode-13.3",
         "env": {
           "PLATFORM": "ios"
         }
@@ -48,7 +47,10 @@
       },
       "android": {
         "buildType": "app-bundle",
-        "gradleCommand": ":app:bundleRelease"
+        "gradleCommand": ":app:bundleRelease",
+        "env": {
+          "ANDROID_CHANNEL": "google"
+        }
       },
       "ios": {
         "enterpriseProvisioning": "universal",
@@ -64,7 +66,10 @@
       },
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
+        "gradleCommand": ":app:assembleRelease",
+        "env": {
+          "ANDROID_CHANNEL": "direct"
+        }
       },
       "ios": {
         "enterpriseProvisioning": "adhoc",
@@ -85,7 +90,7 @@
       },
       "android": {
         "serviceAccountKeyPath": "./pc-api-8644398719570171123-0-dcae07e2afab.json",
-        "track": "beta"
+        "track": "alpha"
       }
     }
   }

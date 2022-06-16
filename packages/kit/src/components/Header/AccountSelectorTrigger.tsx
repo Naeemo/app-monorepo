@@ -6,7 +6,6 @@ import { useIntl } from 'react-intl';
 import {
   Box,
   Button,
-  HStack,
   Icon,
   Pressable,
   Typography,
@@ -23,6 +22,7 @@ import {
   ModalScreenProps,
   RootRoutes,
 } from '@onekeyhq/kit/src/routes/types';
+import { getDeviceTypeByDeviceId } from '@onekeyhq/kit/src/utils/device/ble/OnekeyHardware';
 import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
 import WalletAvatar from './WalletAvatar';
@@ -65,7 +65,7 @@ const AccountSelectorTrigger: FC<Props> = ({
   if (!account) {
     return (
       <Button onPress={handleToggleVisible}>
-        {intl.formatMessage({ id: 'empty__no_account_title' })}
+        {intl.formatMessage({ id: 'action__create_account' })}
       </Button>
     );
   }
@@ -74,10 +74,14 @@ const AccountSelectorTrigger: FC<Props> = ({
   return (
     <Pressable onPress={handleToggleVisible} w="full" justifyContent="center">
       {({ isHovered }) => (
-        <HStack
-          p="2"
+        <Box
+          flexDirection="row"
           alignItems="center"
+          w="full"
+          p={1}
+          pr={2}
           borderRadius="12px"
+          maxW={`${maxItemWidth}px`}
           bg={
             // eslint-disable-next-line no-nested-ternary
             visible && !isVerticalLayout
@@ -87,18 +91,20 @@ const AccountSelectorTrigger: FC<Props> = ({
               : 'transparent'
           }
         >
-          <Box
-            flexDirection="row"
-            alignItems="center"
-            maxW={`${maxItemWidth}px`}
-          >
-            <WalletAvatar walletImage={wallet.type} size="sm" mr={3} />
-            <Typography.Body2Strong isTruncated numberOfLines={1} mr={3}>
-              {name}
-            </Typography.Body2Strong>
-            <Icon size={20} name="SelectorSolid" />
+          <WalletAvatar
+            walletImage={wallet.type}
+            hwWalletType={getDeviceTypeByDeviceId(wallet.associatedDevice)}
+            avatar={wallet.avatar}
+            size="sm"
+            mr={3}
+          />
+          <Typography.Body2Strong isTruncated numberOfLines={1} mr={1}>
+            {name}
+          </Typography.Body2Strong>
+          <Box ml={!isVerticalLayout ? 'auto' : undefined}>
+            <Icon size={20} name="ChevronDownSolid" />
           </Box>
-        </HStack>
+        </Box>
       )}
     </Pressable>
   );

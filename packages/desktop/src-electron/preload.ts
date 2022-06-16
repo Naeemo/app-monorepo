@@ -1,18 +1,19 @@
 import { ipcRenderer } from 'electron';
+import keytar from 'keytar';
 
+export type PrefType = 'camera' | 'bluetooth';
 export type DesktopAPI = {
   hello: string;
-  checkForUpdates: () => void;
-  downloadUpdate: () => void;
-  installUpdate: () => void;
-  cancelUpdate: () => void;
-  skipUpdate: (version: string) => void;
-  windowClose: () => void;
-  windowFocus: () => void;
-  windowMinimize: () => void;
-  windowMaximize: () => void;
-  windowUnmaximize: () => void;
+  arch: string;
+  platform: string;
   reload: () => void;
+  openPrefs: (prefType: PrefType) => void;
+  toggleMaximizeWindow: () => void;
+  onAppState: (cb: (state: 'active' | 'background') => void) => () => void;
+  canPromptTouchID: () => boolean;
+  promptTouchID: (msg: string) => Promise<boolean>;
+  secureSetItemAsync: (key: string, value: string) => Promise<void>;
+  secureGetItemAsync: (key: string) => Promise<string | null>;
 };
 declare global {
   interface Window {
@@ -38,21 +39,37 @@ ipcRenderer.on(
 
 const desktopApi = {
   hello: 'world',
-  // module (auto-updater)
-  checkForUpdates: (isManual?: boolean) =>
-    ipcRenderer.send('update/check', isManual),
-  downloadUpdate: () => ipcRenderer.send('update/download'),
-  installUpdate: () => ipcRenderer.send('update/install'),
-  cancelUpdate: () => ipcRenderer.send('update/cancel'),
-  skipUpdate: (version: string) => ipcRenderer.send('update/skip', version),
-
-  // module (window-controls)
-  windowClose: () => ipcRenderer.send('window/close'),
-  windowFocus: () => ipcRenderer.send('window/focus'),
-  windowMinimize: () => ipcRenderer.send('window/minimize'),
-  windowMaximize: () => ipcRenderer.send('window/maximize'),
-  windowUnmaximize: () => ipcRenderer.send('window/unmaximize'),
+  arch: process.arch,
+  platform: process.platform,
   reload: () => ipcRenderer.send('app/reload'),
+  onAppState: (cb: (state: 'active' | 'background') => void) => {
+    const handler = (_: any, value: any) => cb(value);
+    ipcRenderer.addListener('appState', handler);
+    return () => {
+      ipcRenderer.removeListener('appState', handler);
+    };
+  },
+  openPrefs: () => ipcRenderer.send('app/openPrefs'),
+  toggleMaximizeWindow: () => ipcRenderer.send('app/toggleMaximizeWindow'),
+  canPromptTouchID: () =>
+    ipcRenderer.sendSync('app/canPromptTouchID') as boolean,
+  promptTouchID: async (msg: string): Promise<boolean> =>
+    new Promise((resolve) => {
+      ipcRenderer.once('app/promptTouchID/res', (_, arg) => {
+        if (arg) {
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      });
+      ipcRenderer.send('app/promptTouchID', msg);
+    }),
+  secureSetItemAsync(key: string, value: string) {
+    return keytar.setPassword('OneKey', key, value);
+  },
+  secureGetItemAsync(key: string) {
+    return keytar.getPassword('OneKey', key);
+  },
 };
 
 window.desktopApi = desktopApi;

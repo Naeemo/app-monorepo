@@ -22,14 +22,15 @@ import {
   Typography,
   useForm,
   useIsVerticalLayout,
+  useToast,
 } from '@onekeyhq/components';
-import { useToast } from '@onekeyhq/kit/src/hooks/useToast';
 import {
   SubmitRequestModalRoutesParams,
   SubmitRequestRoutes,
 } from '@onekeyhq/kit/src/routes';
 import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
+import { SkipAppLock } from '../../../components/AppLock';
 import { useSettings } from '../../../hooks/redux';
 import { navigationGoBack } from '../../../hooks/useAppNavigation';
 
@@ -48,16 +49,16 @@ type SubmitValues = {
 };
 
 const defaultOption = (): string => {
-  if (platformEnv.isIOS) {
+  if (platformEnv.isNativeIOS) {
     return 'App on iOS';
   }
-  if (platformEnv.isAndroid) {
+  if (platformEnv.isNativeAndroid) {
     return 'App on Android';
   }
   if (platformEnv.isDesktop) {
     return 'App on Desktop';
   }
-  if (platformEnv.isBrowser) {
+  if (platformEnv.isRuntimeBrowser) {
     return 'App on Browser';
   }
   return 'Hardware';
@@ -393,173 +394,181 @@ export const SubmitRequest: FC = () => {
   const { version } = useSettings();
 
   return (
-    <Modal
-      header={intl.formatMessage({ id: 'form__submit_a_request' })}
-      hideSecondaryAction
-      primaryActionTranslationId="action__submit"
-      primaryActionProps={{
-        onPromise: () => handleSubmit(onSubmit)(),
-        isDisabled: !(
-          isValid && !imageArr.filter((image) => !image?.token)?.length
-        ),
-      }}
-      scrollViewProps={{
-        children: (
-          <Form>
-            <Box zIndex={999}>
-              <Typography.Body2Strong mb="4px">
-                {intl.formatMessage({ id: 'form__request_type' })}
-              </Typography.Body2Strong>
-              <Select
-                containerProps={{
-                  w: 'full',
-                }}
-                headerShown={false}
-                defaultValue={selectOption}
-                options={options}
-                footer={null}
-                onChange={requestTypeChange}
-              />
-            </Box>
-            <Form.Item
-              label={intl.formatMessage({ id: 'form__your_email' })}
-              control={control}
-              name="email"
-              rules={{
-                required: intl.formatMessage({ id: 'form__field_is_required' }),
-                maxLength: {
-                  value: 36,
-                  message: intl.formatMessage({
-                    id: 'msg__exceeding_the_maximum_word_limit',
-                  }),
-                },
-                pattern: {
-                  value: /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/,
-                  message: intl.formatMessage({
-                    id: 'msg__wrong_email_format',
-                  }),
-                },
-              }}
-              defaultValue=""
-            >
-              <Form.Input placeholder="example@gmail.com" />
-            </Form.Item>
-            <Form.Item
-              label={intl.formatMessage({ id: 'form__your_request' })}
-              labelAddon={
-                <IconButton
-                  type="plain"
-                  size="xs"
-                  name="PhotographSolid"
-                  onPress={() => {
-                    if (imageArr.length < 4) {
-                      pickImage();
-                    }
+    <>
+      <SkipAppLock />
+      <Modal
+        header={intl.formatMessage({ id: 'form__submit_a_request' })}
+        hideSecondaryAction
+        primaryActionTranslationId="action__submit"
+        primaryActionProps={{
+          onPromise: () => handleSubmit(onSubmit)(),
+          isDisabled: !(
+            isValid && !imageArr.filter((image) => !image?.token)?.length
+          ),
+        }}
+        scrollViewProps={{
+          height: '560px',
+          children: (
+            <Form>
+              <Box zIndex={999}>
+                <Typography.Body2Strong mb="4px">
+                  {intl.formatMessage({ id: 'form__request_type' })}
+                </Typography.Body2Strong>
+                <Select
+                  containerProps={{
+                    w: 'full',
                   }}
+                  headerShown={false}
+                  defaultValue={selectOption}
+                  options={options}
+                  footer={null}
+                  onChange={requestTypeChange}
                 />
-              }
-              control={control}
-              rules={{
-                required: intl.formatMessage({ id: 'form__field_is_required' }),
-                maxLength: {
-                  value: 1000,
-                  message: intl.formatMessage({
-                    id: 'msg__exceeding_the_maximum_word_limit',
-                  }),
-                },
-              }}
-              name="comment"
-              formControlProps={{ width: 'full' }}
-              defaultValue=""
-            >
-              <Form.Textarea
-                placeholder={intl.formatMessage({
-                  id: 'form__your_question_is',
-                })}
-                borderRadius="12px"
-              />
-            </Form.Item>
-            {imagesList()}
-            {isHardware ? (
-              [
-                <Form.Item
-                  label={intl.formatMessage({ id: 'form__firmware_version' })}
-                  labelAddon={optionLab}
-                  control={control}
-                  rules={{
-                    maxLength: {
-                      value: 12,
-                      message: intl.formatMessage({
-                        id: 'msg__exceeding_the_maximum_word_limit',
-                      }),
-                    },
-                  }}
-                  name="firmwareVersion"
-                  defaultValue=""
-                >
-                  <Form.Input placeholder="0.0.0" />
-                </Form.Item>,
-                <Form.Item
-                  label={intl.formatMessage({ id: 'form__ble_version' })}
-                  labelAddon={optionLab}
-                  control={control}
-                  rules={{
-                    maxLength: {
-                      value: 12,
-                      message: intl.formatMessage({
-                        id: 'msg__exceeding_the_maximum_word_limit',
-                      }),
-                    },
-                  }}
-                  name="bleVersion"
-                  defaultValue=""
-                >
-                  <Form.Input placeholder="0.0.0" />
-                </Form.Item>,
-                <Form.Item
-                  label={intl.formatMessage({ id: 'form__se_version' })}
-                  helpText={intl.formatMessage({
-                    id: 'content__these_information_may_be_found',
-                  })}
-                  rules={{
-                    maxLength: {
-                      value: 12,
-                      message: intl.formatMessage({
-                        id: 'msg__exceeding_the_maximum_word_limit',
-                      }),
-                    },
-                  }}
-                  labelAddon={optionLab}
-                  control={control}
-                  name="seVersion"
-                  defaultValue=""
-                >
-                  <Form.Input placeholder="0.0.0.0" />
-                </Form.Item>,
-              ]
-            ) : (
+              </Box>
               <Form.Item
-                label={intl.formatMessage({ id: 'form__app_version' })}
-                labelAddon={optionLab}
+                label={intl.formatMessage({ id: 'form__your_email' })}
+                control={control}
+                name="email"
+                rules={{
+                  required: intl.formatMessage({
+                    id: 'form__field_is_required',
+                  }),
+                  maxLength: {
+                    value: 36,
+                    message: intl.formatMessage({
+                      id: 'msg__exceeding_the_maximum_word_limit',
+                    }),
+                  },
+                  pattern: {
+                    value: /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/,
+                    message: intl.formatMessage({
+                      id: 'msg__wrong_email_format',
+                    }),
+                  },
+                }}
+                defaultValue=""
+              >
+                <Form.Input placeholder="example@gmail.com" />
+              </Form.Item>
+              <Form.Item
+                label={intl.formatMessage({ id: 'form__your_request' })}
+                labelAddon={
+                  <IconButton
+                    type="plain"
+                    size="xs"
+                    name="PhotographSolid"
+                    onPress={() => {
+                      if (imageArr.length < 4) {
+                        pickImage();
+                      }
+                    }}
+                  />
+                }
                 control={control}
                 rules={{
+                  required: intl.formatMessage({
+                    id: 'form__field_is_required',
+                  }),
                   maxLength: {
-                    value: 12,
+                    value: 1000,
                     message: intl.formatMessage({
                       id: 'msg__exceeding_the_maximum_word_limit',
                     }),
                   },
                 }}
-                name="appVersion"
-                defaultValue={version}
+                name="comment"
+                formControlProps={{ width: 'full' }}
+                defaultValue=""
               >
-                <Form.Input placeholder="0.0.0" />
+                <Form.Textarea
+                  placeholder={intl.formatMessage({
+                    id: 'form__your_question_is',
+                  })}
+                  borderRadius="12px"
+                />
               </Form.Item>
-            )}
-          </Form>
-        ),
-      }}
-    />
+              {imagesList()}
+              {isHardware ? (
+                [
+                  <Form.Item
+                    label={intl.formatMessage({ id: 'form__firmware_version' })}
+                    labelAddon={optionLab}
+                    control={control}
+                    rules={{
+                      maxLength: {
+                        value: 12,
+                        message: intl.formatMessage({
+                          id: 'msg__exceeding_the_maximum_word_limit',
+                        }),
+                      },
+                    }}
+                    name="firmwareVersion"
+                    defaultValue=""
+                  >
+                    <Form.Input placeholder="0.0.0" />
+                  </Form.Item>,
+                  <Form.Item
+                    label={intl.formatMessage({ id: 'form__ble_version' })}
+                    labelAddon={optionLab}
+                    control={control}
+                    rules={{
+                      maxLength: {
+                        value: 12,
+                        message: intl.formatMessage({
+                          id: 'msg__exceeding_the_maximum_word_limit',
+                        }),
+                      },
+                    }}
+                    name="bleVersion"
+                    defaultValue=""
+                  >
+                    <Form.Input placeholder="0.0.0" />
+                  </Form.Item>,
+                  <Form.Item
+                    label={intl.formatMessage({ id: 'form__se_version' })}
+                    helpText={intl.formatMessage({
+                      id: 'content__these_information_may_be_found',
+                    })}
+                    rules={{
+                      maxLength: {
+                        value: 12,
+                        message: intl.formatMessage({
+                          id: 'msg__exceeding_the_maximum_word_limit',
+                        }),
+                      },
+                    }}
+                    labelAddon={optionLab}
+                    control={control}
+                    name="seVersion"
+                    defaultValue=""
+                  >
+                    <Form.Input placeholder="0.0.0.0" />
+                  </Form.Item>,
+                ]
+              ) : (
+                <Form.Item
+                  label={intl.formatMessage({ id: 'form__app_version' })}
+                  labelAddon={optionLab}
+                  control={control}
+                  rules={{
+                    maxLength: {
+                      value: 12,
+                      message: intl.formatMessage({
+                        id: 'msg__exceeding_the_maximum_word_limit',
+                      }),
+                    },
+                  }}
+                  name="appVersion"
+                  defaultValue={version}
+                >
+                  <Form.Input placeholder="0.0.0" />
+                </Form.Item>
+              )}
+            </Form>
+          ),
+        }}
+      />
+    </>
   );
 };
 

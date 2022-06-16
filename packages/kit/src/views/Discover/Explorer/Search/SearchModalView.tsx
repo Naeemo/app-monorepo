@@ -23,7 +23,8 @@ import {
 import DAppIcon from '../../DAppIcon';
 
 import { Header, ListEmptyComponent } from './Header';
-import { useSearchHistories } from './useSearchHistories';
+import { useLimitHistories } from './useLimitHistories';
+import { useSearchLocalDapp } from './useSearchLocalDapp';
 
 import type { MatchDAppItemType } from './useSearchHistories';
 
@@ -40,14 +41,16 @@ const SearchModalView: FC = () => {
   const [searchContent, setSearchContent] = useState<string>(url ?? '');
   const searchContentTerm = useDebounce(searchContent, 200);
 
-  const { loading, searchedHistories, allHistories } = useSearchHistories(
+  const { loading, searchedDapps } = useSearchLocalDapp(
     searchContentTerm,
     searchContent,
   );
 
+  const { limitHistories: allHistories } = useLimitHistories();
+
   const flatListData = useMemo(
-    () => (searchContentTerm ? searchedHistories : allHistories),
-    [searchContentTerm, allHistories, searchedHistories],
+    () => (searchContentTerm ? searchedDapps : allHistories),
+    [searchContentTerm, allHistories, searchedDapps],
   );
 
   const onSelectHistory = (item: MatchDAppItemType | string) => {
@@ -108,7 +111,10 @@ const SearchModalView: FC = () => {
             )}
 
             <Box mx={3} flexDirection="column" flex={1}>
-              <Text typography={{ sm: 'Body1Strong', md: 'Body2Strong' }}>
+              <Text
+                numberOfLines={1}
+                typography={{ sm: 'Body1Strong', md: 'Body2Strong' }}
+              >
                 {name ?? title ?? 'Unknown'}
               </Text>
               <Typography.Body2 numberOfLines={1} color="text-subdued">

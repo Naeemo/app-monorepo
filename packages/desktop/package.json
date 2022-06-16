@@ -10,7 +10,7 @@
     "lint": "tsc --noEmit && eslint . --ext .ts,.tsx",
     "dev": "concurrently \"yarn build:main\" \"yarn dev:renderer\" \"cross-env LAUNCH_ELECTRON=true node scripts/dev.js\"",
     "dev:main": "electron dist/app.js",
-    "dev:renderer": "BROWSER=none WEB_PORT=3001 expo start --web --port 19001",
+    "dev:renderer": "TRANSFORM_REGENERATOR_DISABLED=true BROWSER=none WEB_PORT=3001 expo start --web --port 19001",
     "clean": "rimraf ./build-electron && rimraf ./build && rimraf ./dist && rimraf node_modules && rimraf .expo && rimraf __generated__",
     "clean:build": "rimraf ./build-electron && rimraf ./build && rimraf ./dist && rimraf .expo",
     "build:renderer": "rm -rf ./build && rm -rf ./web-build && expo build:web && mv ./web-build ./build && rsync -a public/static/ build/static",
@@ -27,30 +27,25 @@
     ]
   },
   "dependencies": {
-    "@expo/next-adapter": "^3",
     "@onekeyhq/components": "*",
     "@onekeyhq/kit": "*",
     "electron-is-dev": "^2.0.0",
-    "electron-store": "^8.0.1",
-    "electron-updater": "^4.6.1",
-    "expo": "^44.0.0",
-    "next": "^11.1.2",
+    "expo": "^45.0.5",
+    "keytar": "^7.9.0",
     "node-fetch": "^2.6.7",
-    "react-native-web": "0.17.1"
+    "react-native-web": "0.17.7"
   },
   "devDependencies": {
     "@babel/core": "^7.12.9",
     "@babel/plugin-proposal-class-properties": "^7.16.0",
     "@electron/remote": "^2.0.1",
     "@types/electron-localshortcut": "^3.1.0",
-    "@types/node-fetch": "^2.5.7",
+    "@types/node-fetch": "^2.6.1",
     "cross-env": "^7.0.3",
     "electron": "^15.3.5",
     "electron-builder": "^23.0.3",
     "electron-notarize": "^1.1.1",
     "esbuild": "^0.13.13",
-    "glob": "^7.2.0",
-    "next-compose-plugins": "^2.2.0",
-    "next-transpile-modules": "^8.0.0"
+    "glob": "^7.2.0"
   }
 }

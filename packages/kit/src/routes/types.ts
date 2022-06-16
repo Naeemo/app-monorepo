@@ -32,10 +32,6 @@ export type ModalRoutesParams = {
   [ModalRoutes.Send]: NavigatorScreenParams<SubModalRoutesParams.SendRoutesParams>;
   [ModalRoutes.OnekeyLiteReset]: NavigatorScreenParams<SubModalRoutesParams.OnekeyLiteResetRoutesParams>;
   [ModalRoutes.OnekeyLiteChangePinInputPin]: NavigatorScreenParams<SubModalRoutesParams.OnekeyLiteChangePinRoutesParams>;
-  [ModalRoutes.DappApproveModal]: NavigatorScreenParams<SubModalRoutesParams.DappApproveRoutesParams>;
-  [ModalRoutes.DappSendConfirmModal]: NavigatorScreenParams<SubModalRoutesParams.DappSendRoutesParams>;
-  [ModalRoutes.DappMulticallModal]: NavigatorScreenParams<SubModalRoutesParams.DappMulticallRoutesParams>;
-  [ModalRoutes.DappSignatureModal]: NavigatorScreenParams<SubModalRoutesParams.DappSignatureRoutesParams>;
   [ModalRoutes.DappConnectionModal]: NavigatorScreenParams<SubModalRoutesParams.DappConnectionRoutesParams>;
   [ModalRoutes.Password]: NavigatorScreenParams<SubModalRoutesParams.PasswordRoutesParams>;
   [ModalRoutes.ManageToken]: NavigatorScreenParams<SubModalRoutesParams.ManageTokenRoutesParams>;
@@ -45,39 +41,51 @@ export type ModalRoutesParams = {
   [ModalRoutes.OnekeyHardware]: NavigatorScreenParams<SubModalRoutesParams.OnekeyHardwareRoutesParams>;
   [ModalRoutes.Discover]: NavigatorScreenParams<SubModalRoutesParams.DiscoverRoutesParams>;
   [ModalRoutes.Swap]: NavigatorScreenParams<SubModalRoutesParams.SwapRoutesParams>;
+  [ModalRoutes.UpdateFeature]: NavigatorScreenParams<SubModalRoutesParams.UpdateFeatureRoutesParams>;
+  [ModalRoutes.ScanQrcode]: NavigatorScreenParams<SubModalRoutesParams.ScanQrcodeRoutesParams>;
+  [ModalRoutes.FiatPay]: NavigatorScreenParams<SubModalRoutesParams.FiatPayModalRoutesParams>;
 };
 /** Modal */
 
 /** Tab */
 export enum TabRoutes {
+  // Overview = 'overview',
   Home = 'home',
   Swap = 'swap',
-  Portfolio = 'portfolio',
   Discover = 'discover',
   Me = 'me',
+  Developer = 'developer',
+  Send = 'send',
+  Receive = 'receive',
 }
 
 export type TabRoutesParams = {
+  // [TabRoutes.Overview]: undefined;
   [TabRoutes.Home]: undefined;
   [TabRoutes.Swap]:
     | undefined
     | { inputTokenId?: string; outputTokenId?: string };
-  [TabRoutes.Portfolio]: undefined;
-  [TabRoutes.Discover]: undefined;
+  [TabRoutes.Developer]: undefined;
+  [TabRoutes.Discover]: undefined | { incomingUrl: string };
   [TabRoutes.Me]: undefined;
+  [TabRoutes.Send]: undefined;
+  [TabRoutes.Receive]: undefined;
 };
 /** Tab */
 
 /** HomeStack */
 export enum HomeRoutes {
+  // InitialTab = 'overview',
   InitialTab = 'home',
   Dev = 'dev',
   ScreenTokenDetail = 'TokenDetailScreen',
-  SettingsScreen = 'settings',
+  DebugScreen = 'Debug',
   SettingsWebviewScreen = 'SettingsWebviewScreen',
   ScreenOnekeyLiteDetail = 'OnekeyLiteDetailScreen',
   ExploreScreen = 'ExploreScreen',
   DAppListScreen = 'DAppListScreen',
+  TransactionHistoryScreen = 'TransactionHistoryScreen',
+  FaceId = 'FaceId',
 }
 
 export type HomeRoutesParams = {
@@ -87,8 +95,9 @@ export type HomeRoutesParams = {
     accountId: string;
     networkId: string;
     tokenId: string;
+    historyFilter?: (item: any) => boolean;
   };
-  [HomeRoutes.SettingsScreen]: undefined;
+  [HomeRoutes.DebugScreen]: undefined;
   [HomeRoutes.SettingsWebviewScreen]: { url: string; title?: string };
   [HomeRoutes.ScreenOnekeyLiteDetail]: undefined;
   [HomeRoutes.ExploreScreen]: {
@@ -99,6 +108,11 @@ export type HomeRoutesParams = {
     data: DAppItemType[];
     onItemSelect?: (item: DAppItemType) => Promise<boolean> | void | undefined;
   };
+  [HomeRoutes.TransactionHistoryScreen]: {
+    tokenId?: string;
+    historyFilter?: (item: any) => boolean;
+  };
+  [HomeRoutes.FaceId]: undefined;
 };
 /** HomeStack */
 
@@ -109,9 +123,10 @@ export { RootRoutes };
 /** Root */
 
 export type RootRoutesParams = {
-  [RootRoutes.Root]: undefined;
+  [RootRoutes.Root]: NavigatorScreenParams<HomeRoutesParams> | undefined;
   [RootRoutes.Modal]: NavigatorScreenParams<ModalRoutesParams>;
   [RootRoutes.Tab]: NavigatorScreenParams<TabRoutesParams>;
+  [RootRoutes.Welcome]: undefined;
 };
 
 export type RootScreenProps<T extends keyof RootRoutesParams> =

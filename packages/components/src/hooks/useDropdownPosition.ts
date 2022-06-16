@@ -77,7 +77,7 @@ function useDropdownPosition({
 
   useEffect(() => {
     let timer: any = null;
-    if (!platformEnv.isBrowser) {
+    if (!platformEnv.isRuntimeBrowser) {
       return;
     }
     if (triggerEle && visible) {
@@ -95,6 +95,12 @@ function useDropdownPosition({
           setPosition({
             left: undefined,
             right: triggerPosition.right,
+            top: triggerPosition.top + translateY - dropdownHeight,
+          });
+        } else if (dropdownPosition === 'top-left') {
+          setPosition({
+            left: triggerPosition.left,
+            right: undefined,
             top: triggerPosition.top + translateY - dropdownHeight,
           });
         } else if (dropdownPosition === 'right') {

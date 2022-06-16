@@ -2,7 +2,8 @@ import React, { FC } from 'react';
 
 import { useIntl } from 'react-intl';
 
-import { Box, Icon, Pressable, Typography } from '@onekeyhq/components';
+import { Box, IconButton, Pressable, Typography } from '@onekeyhq/components';
+import { setHaptics } from '@onekeyhq/kit/src/hooks/setHaptics';
 import useNavigation from '@onekeyhq/kit/src/hooks/useNavigation';
 import {
   DiscoverModalRoutes,
@@ -37,7 +38,7 @@ const Mobile: FC<ExplorerViewProps> = ({
       params: {
         screen: DiscoverModalRoutes.SearchHistoryModal,
         params: {
-          url: searchContent,
+          url: searchContent?.searchContent,
           onSelectorItem: (item: MatchDAppItemType | string) =>
             onSearchSubmitEditing?.(item),
         },
@@ -51,17 +52,26 @@ const Mobile: FC<ExplorerViewProps> = ({
       {!!showExplorerBar && (
         <Box
           w="100%"
-          px={7}
-          h="48px"
+          px={6}
+          h="54px"
           bg="surface-subdued"
           flexDirection="row"
           alignItems="center"
         >
-          <Pressable onPress={onGoBack}>
-            <Icon name="ChevronLeftOutline" size={24} />
-          </Pressable>
-
-          <Pressable onPress={onSearch} flex={1} mx={7}>
+          <IconButton
+            onPress={onGoBack}
+            name="ChevronLeftOutline"
+            size="lg"
+            type="plain"
+          />
+          <Pressable
+            onPress={() => {
+              setHaptics();
+              onSearch();
+            }}
+            flex={1}
+            mx={6}
+          >
             <Box
               w="100%"
               h={8}
@@ -78,17 +88,20 @@ const Mobile: FC<ExplorerViewProps> = ({
                 color={searchContent ? 'text-default' : 'text-subdued'}
                 numberOfLines={1}
               >
-                {searchContent ||
-                  intl.formatMessage({
-                    id: 'content__search',
-                  })}
+                {searchContent?.searchContent
+                  ? searchContent?.searchContent
+                  : intl.formatMessage({
+                      id: 'content__search',
+                    })}
               </Typography.Caption>
             </Box>
           </Pressable>
-
-          <Pressable onPress={onMore}>
-            <Icon name="DotsHorizontalOutline" size={24} />
-          </Pressable>
+          <IconButton
+            onPress={onMore}
+            name="DotsHorizontalOutline"
+            size="lg"
+            type="plain"
+          />
         </Box>
       )}
 

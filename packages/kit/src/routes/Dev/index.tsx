@@ -8,11 +8,13 @@ import ComponentsScreen from '@onekeyhq/kit/src/views/Components';
 import AccountGallery from '@onekeyhq/kit/src/views/Components/stories/Account';
 import AddressGallery from '@onekeyhq/kit/src/views/Components/stories/Address';
 import AlertGallery from '@onekeyhq/kit/src/views/Components/stories/Alert';
+import AppUpdateGallery from '@onekeyhq/kit/src/views/Components/stories/AppUpdate';
 import AvatarGallery from '@onekeyhq/kit/src/views/Components/stories/Avatar';
 import BadgeGallery from '@onekeyhq/kit/src/views/Components/stories/Badge';
 import ButtonsGallery from '@onekeyhq/kit/src/views/Components/stories/Buttons';
 import CheckBoxGallery from '@onekeyhq/kit/src/views/Components/stories/CheckBox';
-import DappModalsGallery from '@onekeyhq/kit/src/views/Components/stories/DappModals';
+import ContainerGallery from '@onekeyhq/kit/src/views/Components/stories/Container';
+import DeviceConnection from '@onekeyhq/kit/src/views/Components/stories/DeviceConnection';
 import DialogGallery from '@onekeyhq/kit/src/views/Components/stories/Dialog';
 import EmojiGallery from '@onekeyhq/kit/src/views/Components/stories/Emoji';
 import EmptyGallery from '@onekeyhq/kit/src/views/Components/stories/Empty';
@@ -22,12 +24,14 @@ import IconGallery from '@onekeyhq/kit/src/views/Components/stories/Icon';
 import IconButtons from '@onekeyhq/kit/src/views/Components/stories/IconButtons';
 import ImageViewerGallery from '@onekeyhq/kit/src/views/Components/stories/ImageViewer';
 import InputGallery from '@onekeyhq/kit/src/views/Components/stories/Input';
+import KeyboardGallery from '@onekeyhq/kit/src/views/Components/stories/Keyboard';
 import LoggerGallery from '@onekeyhq/kit/src/views/Components/stories/Logger';
 import MarkdownGallery from '@onekeyhq/kit/src/views/Components/stories/Markdown';
 import ModalGallery from '@onekeyhq/kit/src/views/Components/stories/Modal';
 import NftCardGallery from '@onekeyhq/kit/src/views/Components/stories/NftCard';
 import PageActionsGallery from '@onekeyhq/kit/src/views/Components/stories/PageActions';
 import PinCodeGallery from '@onekeyhq/kit/src/views/Components/stories/PinCode';
+import PopoverGallery from '@onekeyhq/kit/src/views/Components/stories/Popover';
 import QRCodeGallery from '@onekeyhq/kit/src/views/Components/stories/QRCode';
 import RadioGallery from '@onekeyhq/kit/src/views/Components/stories/Radio';
 import RadioBoxGallery from '@onekeyhq/kit/src/views/Components/stories/RadioBox';
@@ -36,6 +40,7 @@ import SearchbarGallery from '@onekeyhq/kit/src/views/Components/stories/Searchb
 import SegmentedControl from '@onekeyhq/kit/src/views/Components/stories/SegmentedControl';
 import SelectGallery from '@onekeyhq/kit/src/views/Components/stories/Select';
 import ShadowsGallery from '@onekeyhq/kit/src/views/Components/stories/Shadows';
+import SkeletonGallery from '@onekeyhq/kit/src/views/Components/stories/Skeleton';
 import SortableListGallery from '@onekeyhq/kit/src/views/Components/stories/SortableList';
 import SpinnerGallery from '@onekeyhq/kit/src/views/Components/stories/Spinner';
 import SwitchGallery from '@onekeyhq/kit/src/views/Components/stories/Switch';
@@ -89,11 +94,18 @@ export enum StackRoutes {
   ComponentReduxMessage = 'component/redux-message',
   ComponentHeaderTabViewContainerGallery = 'component/header-tab-view',
   ComponentLogger = 'component/logger',
+  ComponentFirebase = 'component/firebase',
   ComponentWebview = 'component/webview',
   ComponentPinCode = 'component/pincode',
   ComponentRestfulRequest = 'component/restful-request',
   ComponentImageViewer = 'component/imageViewer',
   ComponentEmojiList = 'component/EmojiList',
+  ComponentKeyboard = 'component/Keyboard',
+  ComponentContentBox = 'component/ContentBox',
+  ComponentAppUpdate = 'component/AppUpdate',
+  ComponentSkeleton = 'component/Skeleton',
+  ComponentDeviceConnection = 'component/device-connection',
+  ComponentPopover = 'component/Popover',
 }
 
 export type StackBasicRoutesParams = {
@@ -136,11 +148,18 @@ export type StackBasicRoutesParams = {
   [StackRoutes.ComponentReduxMessage]: undefined;
   [StackRoutes.ComponentHeaderTabViewContainerGallery]: undefined;
   [StackRoutes.ComponentLogger]: undefined;
+  [StackRoutes.ComponentFirebase]: undefined;
   [StackRoutes.ComponentWebview]: undefined;
   [StackRoutes.ComponentPinCode]: undefined;
   [StackRoutes.ComponentRestfulRequest]: undefined;
   [StackRoutes.ComponentImageViewer]: undefined;
   [StackRoutes.ComponentEmojiList]: undefined;
+  [StackRoutes.ComponentContentBox]: undefined;
+  [StackRoutes.ComponentAppUpdate]: undefined;
+  [StackRoutes.ComponentSkeleton]: undefined;
+  [StackRoutes.ComponentDeviceConnection]: undefined;
+  [StackRoutes.ComponentKeyboard]: undefined;
+  [StackRoutes.ComponentPopover]: undefined;
 };
 
 export const stackScreenList = [
@@ -150,7 +169,6 @@ export const stackScreenList = [
   { name: StackRoutes.ComponentAddress, component: AddressGallery },
   { name: StackRoutes.ComponentInput, component: InputGallery },
   { name: StackRoutes.ComponentCard, component: NftCardGallery },
-  { name: StackRoutes.ComponentDappModals, component: DappModalsGallery },
   { name: StackRoutes.ComponentAvatar, component: AvatarGallery },
   { name: StackRoutes.ComponentTypography, component: TypographyGallery },
   { name: StackRoutes.ComponentToken, component: TokenGallery },
@@ -180,7 +198,10 @@ export const stackScreenList = [
   { name: StackRoutes.ComponentSegmentedControl, component: SegmentedControl },
   { name: StackRoutes.ComponentShadow, component: ShadowsGallery },
   { name: StackRoutes.ComponentPinCode, component: PinCodeGallery },
+  { name: StackRoutes.ComponentAppUpdate, component: AppUpdateGallery },
+  { name: StackRoutes.ComponentSkeleton, component: SkeletonGallery },
   { name: StackRoutes.ComponentRestfulRequest, component: RestfulRequest },
+  { name: StackRoutes.ComponentDeviceConnection, component: DeviceConnection },
   {
     name: StackRoutes.ComponentHeaderTabViewContainerGallery,
     component: HeaderTabViewContainerGallery,
@@ -200,6 +221,18 @@ export const stackScreenList = [
   {
     name: StackRoutes.ComponentEmojiList,
     component: EmojiGallery,
+  },
+  {
+    name: StackRoutes.ComponentContentBox,
+    component: ContainerGallery,
+  },
+  {
+    name: StackRoutes.ComponentKeyboard,
+    component: KeyboardGallery,
+  },
+  {
+    name: StackRoutes.ComponentPopover,
+    component: PopoverGallery,
   },
 ];
 

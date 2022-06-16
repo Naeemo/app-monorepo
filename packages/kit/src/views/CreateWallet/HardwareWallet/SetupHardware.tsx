@@ -5,7 +5,6 @@ import { useNavigation } from '@react-navigation/native';
 import { useIntl } from 'react-intl';
 
 import {
-  Button,
   Center,
   HStack,
   Icon,
@@ -38,7 +37,7 @@ const SetupHardwareModal: FC = () => {
   const { device } = route?.params;
 
   const content = (
-    <Center>
+    <>
       <VStack space={4} w="full">
         {/* Setup new device option */}
         <PressableItem
@@ -104,24 +103,23 @@ const SetupHardwareModal: FC = () => {
           </VStack>
         </PressableItem>
       </VStack>
-    </Center>
+    </>
   );
 
-  const footer = (
-    <Center pt={4} pb={8}>
-      <Button type="plain" size="lg" rightIconName="ChevronRightSolid">
-        {intl.formatMessage({ id: 'action__view_device_details' })}
-      </Button>
-    </Center>
-  );
+  // const footer = (
+  //   <Center pt={4} pb={8}>
+  //     <Button type="plain" size="lg" rightIconName="ChevronRightSolid">
+  //       {intl.formatMessage({ id: 'action__view_device_details' })}
+  //     </Button>
+  //   </Center>
+  // );
 
   return (
     <Modal
       header={device.device.name ?? ''}
       headerDescription={intl.formatMessage({ id: 'content__not_actived' })}
-      footer={footer}
+      footer={null}
       scrollViewProps={{
-        pt: 4,
         children: content,
       }}
     />

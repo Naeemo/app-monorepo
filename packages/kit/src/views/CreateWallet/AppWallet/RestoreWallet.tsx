@@ -18,7 +18,7 @@ import {
   CreateWalletRoutesParams,
 } from '@onekeyhq/kit/src/routes/Modal/CreateWallet';
 import { ModalScreenProps } from '@onekeyhq/kit/src/routes/types';
-import { isNative } from '@onekeyhq/shared/src/platformEnv';
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
 type NavigationProps = ModalScreenProps<CreateWalletRoutesParams>;
 
@@ -26,25 +26,10 @@ const RestoreWalletModal: FC = () => {
   const intl = useIntl();
   const navigation = useNavigation<NavigationProps['navigation']>();
 
-  const startRestoreModal = (inputPwd: string, callBack: () => void) => {
-    navigation.navigate(CreateWalletModalRoutes.OnekeyLiteRestoreModal, {
-      pwd: inputPwd,
-      onRetry: () => {
-        callBack?.();
-      },
-    });
-  };
-
   const startRestorePinVerifyModal = () => {
-    navigation.navigate(CreateWalletModalRoutes.OnekeyLitePinCodeVerifyModal, {
-      callBack: (inputPwd) => {
-        startRestoreModal(inputPwd, () => {
-          console.log('restartRestorePinVerifyModal');
-          startRestorePinVerifyModal();
-        });
-        return true;
-      },
-    });
+    navigation.navigate(
+      CreateWalletModalRoutes.OnekeyLiteRestorePinCodeVerifyModal,
+    );
   };
 
   const content = (
@@ -77,7 +62,7 @@ const RestoreWalletModal: FC = () => {
           />
           {/* <Icon name="ChevronRightOutline" /> */}
         </PressableItem>
-        {isNative() ? (
+        {platformEnv.isNative ? (
           <PressableItem
             p={4}
             bg="surface-default"

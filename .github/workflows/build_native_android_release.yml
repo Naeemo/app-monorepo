@@ -27,13 +27,15 @@ jobs:
       - name: Setup keys secret
         run: |
           echo ${{ secrets.AUTO_SUBMIT_GOOGLE_PLAY_KEY }} | base64 -d > packages/app/pc-api-8644398719570171123-0-dcae07e2afab.json
+          rm -rf packages/app/android/app/google-services.json
+          echo ${{ secrets.GOOGLE_SERVICE_ANDROID }} | base64 -d > packages/app/android/app/google-services.json
 
       - name: Setup Expo
-        uses: expo/expo-github-action@v5
+        uses: expo/expo-github-action@v7
         with:
-          expo-version: 4.x
-          expo-token: ${{ secrets.EXPO_TOKEN }}
-          expo-cache: true
+          expo-version: 5.x
+          eas-version: 0.53.x
+          token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Setup ENV BUILD_NUMBER to 1
         if: ${{ !github.event.workflow_run }}
@@ -81,12 +83,12 @@ jobs:
         if: ${{ github.event.workflow_run }}
         run: |
           cd packages/app
-          npx eas-cli build --profile=production --platform android --non-interactive --no-wait
-          npx eas-cli build --profile=production-store --platform android --non-interactive --no-wait --auto-submit
+          eas build --profile=production --platform android --non-interactive --no-wait
+          eas build --profile=production-store --platform android --non-interactive --no-wait --auto-submit
 
       - name: Build on EAS
         if: ${{ !github.event.workflow_run }}
         run: |
           cd packages/app
-          npx eas-cli build --profile=production --platform android --non-interactive --no-wait
-          npx eas-cli build --profile=production-store --platform android --non-interactive --no-wait
+          eas build --profile=production --platform android --non-interactive --no-wait
+          eas build --profile=production-store --platform android --non-interactive --no-wait

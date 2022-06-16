@@ -1,7 +1,10 @@
-import React, { FC } from 'react';
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+import React, { FC, useMemo } from 'react';
 
 import { CommonActions } from '@react-navigation/native';
 
+import AccountSelector from '@onekeyhq/kit/src/components/Header/AccountSelector';
+import ChainSelector from '@onekeyhq/kit/src/components/Header/ChainSelector';
 import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
 import Box from '../../Box';
@@ -15,95 +18,145 @@ import VStack from '../../VStack';
 import type { ICON_NAMES } from '../../Icon/Icons';
 import type { BottomTabBarProps } from '../BottomTabs/types';
 
-const Sidebar: FC<BottomTabBarProps> = ({ navigation, state, descriptors }) => {
+const Sidebar: FC<BottomTabBarProps> = ({
+  navigation,
+  state,
+  descriptors,
+  foldableList,
+}) => {
   const { routes } = state;
+
   const [activeFontColor, inactiveFontColor] = useThemeValue([
     'text-default',
     'text-subdued',
   ]);
 
+  const tabs = useMemo(
+    () =>
+      routes.map((route, index) => {
+        const isActive = index === state.index;
+        const { options } = descriptors[route.key];
+
+        const onPress = () => {
+          const event = navigation.emit({
+            type: 'tabPress',
+            target: route.key,
+            canPreventDefault: true,
+          });
+
+          if (!isActive && !event.defaultPrevented) {
+            navigation.dispatch({
+              ...CommonActions.navigate({
+                name: route.name,
+                merge: true,
+              }),
+              target: state.key,
+            });
+          }
+        };
+        return (
+          <Pressable
+            key={route.name}
+            onPress={onPress}
+            _hover={!isActive ? { bg: 'surface-hovered' } : undefined}
+            bg={isActive ? 'surface-selected' : undefined}
+            borderRadius="xl"
+            mt={index === routes.length - 1 ? 'auto' : undefined}
+            p="2"
+          >
+            <Box
+              aria-current={isActive ? 'page' : undefined}
+              display="flex"
+              flexDirection="column"
+            >
+              <Box display="flex" flexDirection="row" alignItems="center">
+                <Icon
+                  // @ts-expect-error
+                  name={options?.tabBarIcon?.() as ICON_NAMES}
+                  color={isActive ? 'icon-pressed' : 'icon-default'}
+                  size={24}
+                />
+
+                <Typography.Body2Strong
+                  ml="3"
+                  color={isActive ? activeFontColor : inactiveFontColor}
+                >
+                  {options.tabBarLabel ?? route.name}
+                </Typography.Body2Strong>
+              </Box>
+            </Box>
+            {/* In the future, perhaps a 'Badge' will be placed here. */}
+          </Pressable>
+        );
+      }),
+    [
+      activeFontColor,
+      descriptors,
+      inactiveFontColor,
+      navigation,
+      routes,
+      state.index,
+      state.key,
+    ],
+  );
+
+  const tabsWithFloatButton = useMemo(() => {
+    const swapIndex = routes.findIndex((route) => route.name === 'swap');
+    return [
+      ...tabs.slice(0, swapIndex),
+      foldableList.map((foldable) => (
+        <Pressable
+          key={foldable.name}
+          onPress={foldable.onPress}
+          _hover={{ bg: 'surface-hovered' }}
+          borderRadius="xl"
+          p="2"
+        >
+          <Box display="flex" flexDirection="column">
+            <Box display="flex" flexDirection="row" alignItems="center">
+              <Icon
+                name={foldable?.tabBarIcon?.() as ICON_NAMES}
+                color="icon-default"
+                size={24}
+              />
+
+              <Typography.Body2Strong ml="3" color={inactiveFontColor}>
+                {foldable.tabBarLabel}
+              </Typography.Body2Strong>
+            </Box>
+          </Box>
+        </Pressable>
+      )),
+      ...tabs.slice(swapIndex),
+    ];
+  }, [tabs, foldableList, inactiveFontColor, routes]);
+
   return (
     <Box
       position="relative"
-      w={64}
+      w={{ base: 56, lg: 64 }}
       h="full"
       bg="surface-subdued"
-      borderRightWidth={1}
-      borderRightColor="border-subdued"
+      px={4}
+      pt={3 + (platformEnv.isDesktopMac ? 5 : 0)}
+      pb={5}
     >
-      <VStack flex={1}>
-        {/* Scrollable area */}
+      {/* Scrollable area */}
+      <Box zIndex={1}>
+        <AccountSelector />
+      </Box>
+      <VStack flex={1} mt={4} mb={2}>
         <ScrollView
           _contentContainerStyle={{
             flex: 1,
-            py: platformEnv.isMac && platformEnv.isDesktop ? 12 : 5,
-            px: 4,
           }}
         >
-          <VStack space={1}>
-            {routes.map((route, index) => {
-              const isActive = index === state.index;
-              const { options } = descriptors[route.key];
-
-              const onPress = () => {
-                const event = navigation.emit({
-                  type: 'tabPress',
-                  target: route.key,
-                  canPreventDefault: true,
-                });
-
-                if (!isActive && !event.defaultPrevented) {
-                  navigation.dispatch({
-                    ...CommonActions.navigate({
-                      name: route.name,
-                      merge: true,
-                    }),
-                    target: state.key,
-                  });
-                }
-              };
-              return (
-                <Pressable
-                  key={route.name}
-                  onPress={onPress}
-                  _hover={!isActive ? { bg: 'surface-hovered' } : undefined}
-                  bg={isActive ? 'surface-selected' : undefined}
-                  borderRadius="xl"
-                  p="2"
-                >
-                  <Box
-                    aria-current={isActive ? 'page' : undefined}
-                    display="flex"
-                    flexDirection="column"
-                  >
-                    <Box display="flex" flexDirection="row" alignItems="center">
-                      <Icon
-                        // @ts-expect-error
-                        name={options?.tabBarIcon?.() as ICON_NAMES}
-                        color={isActive ? 'icon-pressed' : 'icon-default'}
-                        size={24}
-                      />
-
-                      <Typography.Body2Strong
-                        ml="3"
-                        color={isActive ? activeFontColor : inactiveFontColor}
-                      >
-                        {options.tabBarLabel ?? route.name}
-                      </Typography.Body2Strong>
-                    </Box>
-                  </Box>
-                  {/* In the future, perhaps a 'Badge' will be placed here. */}
-                </Pressable>
-              );
-            })}
+          <VStack space={1} flex={1}>
+            {tabsWithFloatButton}
           </VStack>
-          {/* <VStack space={1} pt={1} mt="auto">
-            <Typography.Body2Strong>
-              Address book and settings here.
-            </Typography.Body2Strong>
-          </VStack> */}
         </ScrollView>
       </VStack>
+      <ChainSelector />
     </Box>
   );
 };

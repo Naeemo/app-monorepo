@@ -15,24 +15,23 @@ import {
 } from '@onekeyhq/components';
 import { ModalRoutes, RootRoutes } from '@onekeyhq/kit/src/routes/types';
 
-import { useSwapQuote } from '../../hooks';
-
+import { useSwapQuoteCallback } from './hooks/useSwap';
 import { SwapRoutes } from './typings';
 
 const SwapHeader = () => {
   const intl = useIntl();
   const navigation = useNavigation();
-  const { refresh } = useSwapQuote();
+  const onSwapQuoteCallback = useSwapQuoteCallback({ silent: false });
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const onRefresh = useCallback(() => {
-    refresh();
+  const onHandleRefresh = useCallback(() => {
+    onSwapQuoteCallback();
     fadeAnim.setValue(0);
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 1000,
       useNativeDriver: true,
     }).start();
-  }, [refresh, fadeAnim]);
+  }, [onSwapQuoteCallback, fadeAnim]);
   const onSetting = useCallback(() => {
     navigation.navigate(RootRoutes.Modal, {
       screen: ModalRoutes.Swap,
@@ -42,7 +41,7 @@ const SwapHeader = () => {
     });
   }, [navigation]);
   return (
-    <Center w="full" my="6" px="4">
+    <Center w="full" mt={8} mb={6} px="4">
       <Box
         display="flex"
         flexDirection="row"
@@ -54,7 +53,7 @@ const SwapHeader = () => {
           {intl.formatMessage({ id: 'title__swap' })}
         </Typography.DisplayLarge>
         <HStack>
-          <Button type="plain" onPress={onRefresh} pl="2" pr="2">
+          <Button type="plain" onPress={onHandleRefresh} pl="2" pr="2">
             <Animated.View
               style={{
                 transform: [
@@ -67,10 +66,10 @@ const SwapHeader = () => {
                 ],
               }}
             >
-              <Icon name="RefreshOutline" size={20} />
+              <Icon name="RefreshSolid" size={20} />
             </Animated.View>
           </Button>
-          <IconButton type="plain" name="CogOutline" onPress={onSetting} />
+          <IconButton ml={2} type="plain" name="CogSolid" onPress={onSetting} />
         </HStack>
       </Box>
     </Center>

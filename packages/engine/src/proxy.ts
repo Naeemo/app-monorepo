@@ -8,10 +8,6 @@ import {
   encode as toCfxAddress,
   decode as toEthAddress,
 } from '@conflux-dev/conflux-address-js';
-import { defaultAbiCoder } from '@ethersproject/abi';
-import { keccak256 } from '@ethersproject/keccak256';
-import * as ethTransaction from '@ethersproject/transactions';
-import { JsonRPCRequest } from '@onekeyfe/blockchain-libs/dist/basic/request/json-rpc';
 import { RestfulRequest } from '@onekeyfe/blockchain-libs/dist/basic/request/restful';
 import { Coingecko } from '@onekeyfe/blockchain-libs/dist/price/channels/coingecko';
 import { ProviderController as BaseProviderController } from '@onekeyfe/blockchain-libs/dist/provider';
@@ -20,17 +16,14 @@ import {
   BaseProvider,
   ClientFilter,
 } from '@onekeyfe/blockchain-libs/dist/provider/abc';
-import { Algod } from '@onekeyfe/blockchain-libs/dist/provider/chains/algo/algod';
+import { BlockBook } from '@onekeyfe/blockchain-libs/dist/provider/chains/btc/blockbook';
 import { Geth } from '@onekeyfe/blockchain-libs/dist/provider/chains/eth/geth';
-import { NearCli } from '@onekeyfe/blockchain-libs/dist/provider/chains/near/nearcli';
-import { Solana } from '@onekeyfe/blockchain-libs/dist/provider/chains/sol/solana';
 import {
-  ExtendedKey,
   N,
-  batchGetPrivateKeys,
   sign,
   uncompressPublicKey,
 } from '@onekeyfe/blockchain-libs/dist/secret';
+import { decrypt } from '@onekeyfe/blockchain-libs/dist/secret/encryptors/aes256';
 import { ChainInfo } from '@onekeyfe/blockchain-libs/dist/types/chain';
 import {
   TransactionStatus,
@@ -41,12 +34,13 @@ import {
   Signer as ISigner,
   Verifier as IVerifier,
 } from '@onekeyfe/blockchain-libs/dist/types/secret';
-import { IJsonRpcRequest } from '@onekeyfe/cross-inpage-provider-types';
+import { web3Errors } from '@onekeyfe/cross-inpage-provider-errors';
 import BigNumber from 'bignumber.js';
 import { isNil } from 'lodash';
 
 import {
   IMPL_ALGO,
+  IMPL_BTC,
   IMPL_CFX,
   IMPL_EVM,
   IMPL_NEAR,
@@ -55,7 +49,6 @@ import {
   SEPERATOR,
 } from './constants';
 import { NotImplemented, OneKeyInternalError } from './errors';
-import * as OneKeyHardware from './hardware';
 import { getCurveByImpl } from './managers/impl';
 import { getImplFromNetworkId } from './managers/network';
 import { getPresetNetworks } from './presets';
@@ -63,11 +56,10 @@ import {
   AccountType,
   DBAccount,
   DBSimpleAccount,
+  DBUTXOAccount,
   DBVariantAccount,
 } from './types/account';
-import { CredentialSelector, CredentialType } from './types/credential';
-import { HistoryEntryMeta, HistoryEntryStatus } from './types/history';
-import { ETHMessageTypes, Message } from './types/message';
+import { HistoryEntryStatus } from './types/history';
 import { DBNetwork, EIP1559Fee, Network } from './types/network';
 import { Token } from './types/token';
 
@@ -84,6 +76,7 @@ const IMPL_MAPPINGS: Record<
   [IMPL_NEAR]: { defaultClient: 'NearCli' },
   [IMPL_STC]: { defaultClient: 'StcClient' },
   [IMPL_CFX]: { defaultClient: 'Conflux' },
+  [IMPL_BTC]: { defaultClient: 'BlockBook' },
 };
 
 type Curve = 'secp256k1' | 'ed25519';
@@ -106,8 +99,13 @@ function fromDBNetworkToChainInfo(dbNetwork: DBNetwork): ChainInfo {
   const chainId = parseInt(dbNetwork.id.split(SEPERATOR)[1]);
   implOptions = { ...implOptions, chainId };
 
+  let code = dbNetwork.id;
+  if (dbNetwork.impl === IMPL_BTC) {
+    code = dbNetwork.impl;
+  }
+
   return {
-    code: dbNetwork.id,
+    code,
     feeCode: dbNetwork.id,
     impl: dbNetwork.impl,
     curve: (dbNetwork.curve || getCurveByImpl(dbNetwork.impl)) as Curve,
@@ -158,10 +156,10 @@ export function fillUnsignedTxObj({
   }
 
   const { type, nonce, feeLimit, feePricePerUnit, ...payload } = extra as {
-    type: string;
-    nonce: number;
-    feeLimit: BigNumber;
-    feePricePerUnit: BigNumber;
+    type?: string;
+    nonce?: number;
+    feeLimit?: BigNumber;
+    feePricePerUnit?: BigNumber;
     [key: string]: any;
   };
   const { maxFeePerGas, maxPriorityFeePerGas } = payload as {
@@ -169,10 +167,10 @@ export function fillUnsignedTxObj({
     maxPriorityFeePerGas: string;
   };
   // EIP 1559
-  if (
+  const eip1559 =
     typeof maxFeePerGas === 'string' &&
-    typeof maxPriorityFeePerGas === 'string'
-  ) {
+    typeof maxPriorityFeePerGas === 'string';
+  if (eip1559) {
     let maxFeePerGasBN = new BigNumber(maxFeePerGas);
     let maxPriorityFeePerGasBN = new BigNumber(maxPriorityFeePerGas);
 
@@ -198,6 +196,10 @@ export function fillUnsignedTxObj({
   let feePricePerUnitBN = feePricePerUnit;
   if (shiftFeeDecimals) {
     feePricePerUnitBN = feePricePerUnitBN?.shiftedBy(network.feeDecimals);
+  }
+  // TODO remove hack for eip1559 gasPrice=1
+  if (eip1559) {
+    feePricePerUnitBN = new BigNumber(1);
   }
 
   return {
@@ -260,24 +262,30 @@ class Verifier implements IVerifier {
   }
 }
 
-class Signer extends Verifier implements ISigner {
+export class Signer extends Verifier implements ISigner {
   constructor(
-    private encryptedPrivateKey: ExtendedKey,
+    private encryptedPrivateKey: Buffer,
     private password: string,
     private curve: Curve,
   ) {
-    super(N(curve, encryptedPrivateKey, password).key.toString('hex'), curve);
+    super(
+      N(
+        curve,
+        { key: encryptedPrivateKey, chainCode: Buffer.alloc(32) },
+        password,
+      ).key.toString('hex'),
+      curve,
+    );
   }
 
-  getPrvkey() {
-    // Not used.
-    return Promise.resolve(Buffer.from([]));
+  getPrvkey(): Promise<Buffer> {
+    return Promise.resolve(decrypt(this.password, this.encryptedPrivateKey));
   }
 
   sign(digest: Buffer): Promise<[Buffer, number]> {
     const signature = sign(
       this.curve,
-      this.encryptedPrivateKey.key,
+      this.encryptedPrivateKey,
       digest,
       this.password,
     );
@@ -291,13 +299,36 @@ class Signer extends Verifier implements ISigner {
   }
 }
 
+// blockchain-libs can throw ResponseError and JSONResponseError upon rpc call
+// errors/failures. Each error has both message & response properties.
+// We read the possible error, categorize it by its message and decide
+// what to throw to upper layer.
+function extractResponseError(e: unknown): unknown {
+  const { message, response } = e as { message?: string; response?: any };
+  if (typeof message === 'undefined' || typeof response === 'undefined') {
+    // not what we expected, throw original error out.
+    return e;
+  }
+  if (message === 'Error JSON PRC response') {
+    // TODO: avoid this stupid string comparison and there is even an unbearable typo.
+    // this is what blockchain-libs can throw upon a JSON RPC call failure
+    const { error: rpcError } = response;
+    if (typeof rpcError !== 'undefined') {
+      return web3Errors.rpc.internal({ data: rpcError });
+    }
+  }
+  // Otherwise, throw the original error out.
+  // TODO: see whether to wrap it into a gerinic OneKeyError.
+  return e;
+}
+
 class ProviderController extends BaseProviderController {
   private clients: Record<string, BaseClient> = {};
 
   private providers: Record<string, BaseProvider> = {};
 
   constructor(
-    private getChainInfoByNetworkId: (networkId: string) => Promise<ChainInfo>,
+    public getChainInfoByNetworkId: (networkId: string) => Promise<ChainInfo>,
   ) {
     super((_chainCode) => ({
       code: '',
@@ -309,7 +340,7 @@ class ProviderController extends BaseProviderController {
     }));
   }
 
-  private getVerifier(networkId: string, pub: string): IVerifier {
+  public getVerifier(networkId: string, pub: string): IVerifier {
     const provider = this.providers[networkId];
     if (typeof provider === 'undefined') {
       throw new OneKeyInternalError('Provider not found.');
@@ -318,50 +349,9 @@ class ProviderController extends BaseProviderController {
     const { curve } = this.providers[networkId].chainInfo;
     return new Verifier(pub, curve as Curve);
   }
-
-  public getSigners(
-    networkId: string,
-    credential: CredentialSelector,
-    dbAccount: DBAccount,
-  ): { [p: string]: ISigner } {
-    const provider = this.providers[networkId];
-    if (typeof provider === 'undefined') {
-      throw new OneKeyInternalError('Provider not found.');
-    }
-
-    const { curve } = this.providers[networkId].chainInfo;
-    let extendedKey: ExtendedKey;
-    if (credential.type === CredentialType.SOFTWARE) {
-      const pathComponents = dbAccount.path.split('/');
-      const relPath = pathComponents.pop() as string;
-      extendedKey = batchGetPrivateKeys(
-        curve,
-        credential.seed,
-        credential.password,
-        pathComponents.join('/'),
-        [relPath],
-      )[0].extendedKey;
-    } else if (credential.type === CredentialType.PRIVATE_KEY) {
-      extendedKey = {
-        key: credential.privateKey,
-        chainCode: Buffer.alloc(0),
-      };
-    } else {
-      throw new OneKeyInternalError('Invalid credential type.');
-    }
-
-    return {
-      [dbAccount.address]: new Signer(
-        extendedKey,
-        credential.password,
-        curve as Curve,
-      ),
-    };
-  }
-
   // TODO: set client api to support change.
 
-  async getClient(
+  override async getClient(
     networkId: string,
     filter?: ClientFilter,
   ): Promise<BaseClient> {
@@ -387,7 +377,7 @@ class ProviderController extends BaseProviderController {
     return Promise.reject(new OneKeyInternalError('Unable to init client.'));
   }
 
-  async getProvider(networkId: string): Promise<BaseProvider> {
+  override async getProvider(networkId: string): Promise<BaseProvider> {
     if (typeof this.providers[networkId] === 'undefined') {
       const chainInfo = await this.getChainInfoByNetworkId(networkId);
       const { Provider } = this.requireChainImpl(chainInfo.impl);
@@ -406,7 +396,7 @@ class ProviderController extends BaseProviderController {
     return Promise.reject(new OneKeyInternalError('Unable to init provider.'));
   }
 
-  requireChainImpl(impl: string): any {
+  override requireChainImpl(impl: string): any {
     return super.requireChainImpl(IMPL_MAPPINGS[impl]?.implName || impl);
   }
 
@@ -465,12 +455,38 @@ class ProviderController extends BaseProviderController {
           address = await this.addressFromBase(networkId, dbAccount.address);
         }
         break;
+      case AccountType.UTXO:
+        address = (dbAccount as DBUTXOAccount).xpub;
+        break;
       default:
         throw new NotImplemented();
     }
     return Promise.resolve(address);
   }
 
+  override async getBalances(
+    networkId: string,
+    requests: Array<any>,
+  ): Promise<Array<BigNumber | undefined>> {
+    if (getImplFromNetworkId(networkId) === IMPL_BTC) {
+      const provider = await this.getProvider(networkId);
+      const { restful } = await (
+        provider as unknown as { blockbook: Promise<BlockBook> }
+      ).blockbook;
+      return Promise.all(
+        requests.map(({ address }: { address: string }) =>
+          restful
+            .get(`/api/v2/xpub/${address}`, { details: 'basic' })
+            .then((r) => r.json())
+            .then((r: { balance: string }) => new BigNumber(r.balance))
+            .catch(() => undefined),
+        ),
+      );
+    }
+    return super.getBalances(networkId, requests);
+  }
+
+  // TODO: move this into vaults.
   async proxyGetBalances(
     networkId: string,
     target: Array<string> | DBAccount,
@@ -497,35 +513,6 @@ class ProviderController extends BaseProviderController {
     );
   }
 
-  async getTokenAllowance(
-    networkId: string,
-    dbAccount: DBAccount,
-    token: Token,
-    spenderAddress: string,
-  ): Promise<BigNumber> {
-    // TODO: move this into chainlibs
-    const [impl] = networkId.split(SEPERATOR);
-    switch (impl) {
-      case IMPL_EVM: {
-        // keccak256(Buffer.from('allowance(address,address)') => '0xdd62ed3e...'
-        const allowanceMethodID = '0xdd62ed3e';
-        const data = `${allowanceMethodID}${defaultAbiCoder
-          .encode(['address', 'address'], [dbAccount.address, spenderAddress])
-          .slice(2)}`;
-        const client: Geth = (await this.getClient(networkId)) as Geth;
-        const rawAllowanceHex = await client.rpc.call('eth_call', [
-          { to: token.tokenIdOnNetwork, data },
-          'latest',
-        ]);
-        return new BigNumber(rawAllowanceHex as string).shiftedBy(
-          -token.decimals,
-        );
-      }
-      default:
-        throw new NotImplemented();
-    }
-  }
-
   async preSend(
     network: Network,
     dbAccount: DBAccount,
@@ -543,57 +530,6 @@ class ProviderController extends BaseProviderController {
       throw new OneKeyInternalError('Failed to estimate gas limit.');
     }
     return unsignedTx.feeLimit;
-  }
-
-  async simpleTransfer(
-    network: Network,
-    dbAccount: DBAccount,
-    credential: CredentialSelector,
-    to: string,
-    value: BigNumber,
-    token?: Token,
-    extra?: { [key: string]: any },
-  ): Promise<{ txid: string; rawTx: string; success: boolean }> {
-    // network.id: "evm--97"
-    dbAccount.address = await this.selectAccountAddress(network.id, dbAccount);
-    const unsignedTx = await this.buildUnsignedTx(
-      network.id,
-      fillUnsignedTx(network, dbAccount, to, value, token, extra),
-    );
-    let txid: string;
-    let rawTx: string;
-    let success = true;
-    switch (credential.type) {
-      case CredentialType.PRIVATE_KEY:
-      // fall through
-      case CredentialType.SOFTWARE:
-        ({ txid, rawTx } = await this.signTransaction(
-          network.id,
-          unsignedTx,
-          this.getSigners(network.id, credential, dbAccount),
-        ));
-        break;
-      case CredentialType.HARDWARE:
-        ({ txid, rawTx } = await OneKeyHardware.signTransaction(
-          network.id,
-          dbAccount.path,
-          unsignedTx,
-        ));
-        break;
-      default:
-        throw new OneKeyInternalError('Incorrect credential selector.');
-    }
-    try {
-      txid = await this.broadcastTransaction(network.id, rawTx);
-    } catch (e) {
-      console.error(e);
-      success = false;
-    }
-    return {
-      txid,
-      rawTx,
-      success,
-    };
   }
 
   async getGasPrice(networkId: string): Promise<Array<BigNumber | EIP1559Fee>> {
@@ -678,7 +614,7 @@ class ProviderController extends BaseProviderController {
 
   async refreshPendingTxs(
     networkId: string,
-    pendingTxs: Array<{ id: string; createdAt: number }>,
+    pendingTxs: Array<{ id: string }>,
   ): Promise<Record<string, HistoryEntryStatus>> {
     if (pendingTxs.length === 0) {
       return {};
@@ -690,17 +626,10 @@ class ProviderController extends BaseProviderController {
       networkId,
       pendingTxs.map((tx) => tx.id.replace(regex, '')),
     );
-    const now = Date.now();
+
     updatedStatuses.forEach((status, index) => {
-      const { createdAt, id } = pendingTxs[index];
-      if (
-        status === TransactionStatus.NOT_FOUND ||
-        status === TransactionStatus.INVALID
-      ) {
-        if (now - createdAt > 60 * 5) {
-          ret[id] = HistoryEntryStatus.DROPPED;
-        }
-      } else if (status === TransactionStatus.CONFIRM_AND_SUCCESS) {
+      const { id } = pendingTxs[index];
+      if (status === TransactionStatus.CONFIRM_AND_SUCCESS) {
         ret[id] = HistoryEntryStatus.SUCCESS;
       } else if (status === TransactionStatus.CONFIRM_BUT_FAILED) {
         ret[id] = HistoryEntryStatus.FAILED;
@@ -710,179 +639,28 @@ class ProviderController extends BaseProviderController {
     return ret;
   }
 
-  async proxyRPCCall<T>(
+  // Wrap to throw JSON RPC errors
+  override async buildUnsignedTx(
     networkId: string,
-    request: IJsonRpcRequest,
-  ): Promise<T> {
-    let client: { rpc: JsonRPCRequest };
-    switch (getImplFromNetworkId(networkId)) {
-      case IMPL_EVM:
-        client = (await this.getClient(networkId)) as unknown as {
-          rpc: JsonRPCRequest;
-        };
-        break;
-      case IMPL_SOL:
-        client = (await this.getClient(networkId)) as unknown as {
-          rpc: JsonRPCRequest;
-        };
-        break;
-      default:
-        throw new NotImplemented();
+    unsignedTx: UnsignedTx,
+  ): Promise<UnsignedTx> {
+    try {
+      return await super.buildUnsignedTx(networkId, unsignedTx);
+    } catch (e) {
+      throw extractResponseError(e);
     }
-    return client.rpc.call(
-      request.method,
-      request.params as Record<string, any> | Array<any>,
-    );
   }
 
-  async signMessages(
-    credential: CredentialSelector,
-    password: string,
-    network: Network,
-    dbAccount: DBAccount,
-    messages: Array<Message>,
-  ): Promise<Array<string>> {
-    if (network.impl !== IMPL_EVM) {
-      // TODO: other network signing.
-      throw new NotImplemented(
-        `Message signing not support on ${network.name}`,
-      );
+  // Wrap to throw JSON RPC errors
+  override async broadcastTransaction(
+    networkId: string,
+    rawTx: string,
+  ): Promise<string> {
+    try {
+      return await super.broadcastTransaction(networkId, rawTx);
+    } catch (e) {
+      throw extractResponseError(e);
     }
-    dbAccount.address = await this.selectAccountAddress(network.id, dbAccount);
-    const defaultType = ETHMessageTypes.PERSONAL_SIGN;
-    const [signer] = Object.values(
-      this.getSigners(network.id, credential, dbAccount),
-    );
-    return Promise.all(
-      messages.map((message) => {
-        if (typeof message === 'string') {
-          return this.signMessage(
-            network.id,
-            { message, type: defaultType },
-            signer,
-          );
-        }
-        return this.signMessage(network.id, message, signer);
-      }),
-    );
-  }
-
-  async signTransactions(
-    credential: CredentialSelector,
-    network: Network,
-    dbAccount: DBAccount,
-    transactions: Array<string>,
-    overwriteParams?: string,
-    autoBroadcast = true,
-  ): Promise<
-    Array<{
-      txid: string;
-      rawTx: string;
-      success: boolean;
-      txMeta: Partial<HistoryEntryMeta>;
-    }>
-  > {
-    const ret = [];
-    switch (network.impl) {
-      case IMPL_EVM: {
-        if (transactions.length !== 1) {
-          throw new NotImplemented(
-            `Only one single transaction is supported on ${IMPL_EVM}`,
-          );
-        }
-        const tx = ethTransaction.parse(transactions[0]);
-        if (typeof tx.hash !== 'undefined') {
-          throw new OneKeyInternalError('Transaction already signed.');
-        }
-        const unsignedTx = {
-          to: tx.to,
-          nonce: tx.nonce,
-          gasLimit: tx.gasLimit,
-          gasPrice: tx.gasPrice,
-          data: tx.data,
-          value: tx.value,
-          chainId: tx.chainId || parseInt(network.id.split(SEPERATOR)[1]),
-          type: tx.type,
-          accessList: tx.accessList,
-          maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
-          maxFeePerGas: tx.maxFeePerGas,
-        };
-        if (typeof overwriteParams === 'string' && overwriteParams.length > 2) {
-          const toOverwrite: {
-            gasPrice?: string | BigNumber;
-            maxPriorityFeePerGas?: string | BigNumber;
-            maxFeePerGas?: string | BigNumber;
-          } = JSON.parse(overwriteParams);
-          if (typeof toOverwrite.gasPrice !== 'undefined') {
-            toOverwrite.gasPrice = new BigNumber(
-              toOverwrite.gasPrice,
-            ).shiftedBy(network.feeDecimals);
-          } else if (
-            typeof toOverwrite.maxPriorityFeePerGas !== 'undefined' &&
-            typeof toOverwrite.maxFeePerGas !== 'undefined'
-          ) {
-            toOverwrite.maxPriorityFeePerGas = new BigNumber(
-              toOverwrite.maxPriorityFeePerGas,
-            ).shiftedBy(network.feeDecimals);
-            toOverwrite.maxFeePerGas = new BigNumber(
-              toOverwrite.maxFeePerGas,
-            ).shiftedBy(network.feeDecimals);
-          }
-          Object.assign(unsignedTx, toOverwrite);
-        }
-        if (typeof unsignedTx.nonce === 'undefined') {
-          const [addressInfo] = await this.getAddresses(network.id, [
-            dbAccount.address,
-          ]);
-          if (
-            typeof addressInfo === 'undefined' ||
-            typeof addressInfo.nonce === 'undefined'
-          ) {
-            throw new OneKeyInternalError('Failed to get address nonce');
-          }
-          unsignedTx.nonce = addressInfo.nonce;
-        }
-        if (
-          typeof unsignedTx.maxPriorityFeePerGas !== 'undefined' &&
-          typeof unsignedTx.maxFeePerGas !== 'undefined'
-        ) {
-          delete unsignedTx.gasPrice;
-          unsignedTx.type = 2;
-        } else if (typeof unsignedTx.accessList === 'undefined') {
-          delete unsignedTx.type;
-        }
-        const [signature] = await Object.values(
-          this.getSigners(network.id, credential, dbAccount),
-        )[0].sign(
-          Buffer.from(
-            keccak256(ethTransaction.serialize(unsignedTx)).slice(2),
-            'hex',
-          ),
-        );
-        const rawTx = ethTransaction.serialize(unsignedTx, signature);
-        let txid = keccak256(rawTx);
-        let success = true;
-        if (autoBroadcast) {
-          try {
-            txid = await this.broadcastTransaction(network.id, rawTx);
-          } catch (e) {
-            console.error(e);
-            success = false;
-          }
-        }
-        const txMeta = {
-          contract: tx.data.length > 0 ? tx.to : '',
-          target: tx.data.length > 0 ? '' : tx.to,
-          value: tx.value.toString(),
-        };
-        ret.push({ txid, rawTx, success, txMeta });
-        break;
-      }
-      // TODO: other networks
-      default:
-        throw new NotImplemented();
-    }
-    return Promise.resolve(ret);
   }
 }
 
@@ -1001,37 +779,9 @@ class PriceController {
   }
 }
 
-async function getRPCStatus(
-  url: string,
-  impl: string,
-): Promise<{ responseTime: number; latestBlock: number }> {
-  let client: BaseClient;
-  switch (impl) {
-    case IMPL_ALGO:
-      client = new Algod(url);
-      break;
-    case IMPL_EVM:
-      client = new Geth(url);
-      break;
-    case IMPL_NEAR:
-      client = new NearCli(url);
-      break;
-    case IMPL_SOL:
-      client = new Solana(url);
-      break;
-    default:
-      throw new NotImplemented(
-        `Adding network for implemetation ${impl} is not supported.`,
-      );
-  }
-  const start = performance.now();
-  const latestBlock = (await client.getInfo()).bestBlockNumber;
-  return { responseTime: Math.floor(performance.now() - start), latestBlock };
-}
-
 export {
   fromDBNetworkToChainInfo,
   ProviderController,
   PriceController,
-  getRPCStatus,
+  extractResponseError,
 };

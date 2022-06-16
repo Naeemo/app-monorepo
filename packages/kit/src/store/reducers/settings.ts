@@ -4,6 +4,9 @@ import uuid from 'react-native-uuid';
 import { LocaleSymbol } from '@onekeyhq/components/src/locale';
 import { ThemeVariant } from '@onekeyhq/components/src/Provider/theme';
 import { getTimeStamp } from '@onekeyhq/kit/src/utils/helper';
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
+
+import { ValidationFields } from '../../components/Protected/types';
 
 type SettingsState = {
   theme: ThemeVariant | 'system';
@@ -18,10 +21,21 @@ type SettingsState = {
   refreshTimeStamp: number;
   autoRefreshTimeStamp: number;
   swapSlippagePercent: string;
+  validationState: {
+    [ValidationFields.Unlock]?: boolean;
+    [ValidationFields.Payment]?: boolean;
+    [ValidationFields.Wallet]?: boolean;
+    [ValidationFields.Account]?: boolean;
+    [ValidationFields.Secret]?: boolean;
+  };
+  devMode: {
+    enable: boolean;
+    preReleaseUpdate: boolean;
+  };
 };
 
 const initialState: SettingsState = {
-  theme: 'dark',
+  theme: 'system',
   locale: 'zh-CN',
   version: process.env.VERSION ?? '1.0.0',
   buildNumber: process.env.BUILD_NUMBER ?? '2022010100',
@@ -33,7 +47,36 @@ const initialState: SettingsState = {
   refreshTimeStamp: getTimeStamp(),
   autoRefreshTimeStamp: getTimeStamp(),
   swapSlippagePercent: '3',
+  validationState: {
+    [ValidationFields.Unlock]: true,
+    [ValidationFields.Payment]: true,
+    [ValidationFields.Wallet]: true,
+    [ValidationFields.Account]: true,
+    [ValidationFields.Secret]: true,
+  },
+  devMode: {
+    enable: false,
+    preReleaseUpdate: false,
+  },
 };
+
+export const THEME_PRELOAD_STORAGE_KEY = 'ONEKEY_THEME_PRELOAD';
+export function setThemePreloadToLocalStorage(
+  value: string,
+  forceUpdate = true,
+) {
+  try {
+    const key = THEME_PRELOAD_STORAGE_KEY;
+    if (platformEnv.isRuntimeBrowser) {
+      if (forceUpdate || !localStorage.getItem(key)) {
+        localStorage.setItem(key, value);
+      }
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+setThemePreloadToLocalStorage(initialState.theme, false);
 
 export const settingsSlice = createSlice({
   name: 'settings',
@@ -79,6 +122,22 @@ export const settingsSlice = createSlice({
     setSwapSlippagePercent: (state, action: PayloadAction<string>) => {
       state.swapSlippagePercent = action.payload;
     },
+    setValidationState: (
+      state,
+      action: PayloadAction<{ key: ValidationFields; value: boolean }>,
+    ) => {
+      if (!state.validationState) {
+        state.validationState = {};
+      }
+      const { key, value } = action.payload;
+      state.validationState[key] = value;
+    },
+    setDevMode(state, action: PayloadAction<boolean>) {
+      state.devMode = { ...state.devMode, enable: action.payload };
+    },
+    setPreReleaseUpdate(state, action: PayloadAction<boolean>) {
+      state.devMode = { ...state.devMode, preReleaseUpdate: action.payload };
+    },
   },
 });
 
@@ -94,6 +153,9 @@ export const {
   updateVersionAndBuildNumber,
   setEnableLocalAuthentication,
   setSwapSlippagePercent,
+  setValidationState,
+  setDevMode,
+  setPreReleaseUpdate,
 } = settingsSlice.actions;
 
 export default settingsSlice.reducer;

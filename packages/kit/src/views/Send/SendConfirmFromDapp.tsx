@@ -8,23 +8,37 @@ import {
 
 import useDappParams from '../../hooks/useDappParams';
 
-import { SendRoutes, SendRoutesParams } from './types';
+import { SendConfirmParams, SendRoutes, SendRoutesParams } from './types';
 
 type NavigationProps = NavigationProp<SendRoutesParams, SendRoutes.SendConfirm>;
 
 function SendConfirmFromDapp() {
   const navigation = useNavigation<NavigationProps>();
   // @ts-ignore
-  const { sourceInfo, encodedTx } = useDappParams();
+  const { sourceInfo, encodedTx, unsignedMessage } = useDappParams();
   useEffect(() => {
-    navigation.dispatch(
-      // replace router to SendConfirm
-      StackActions.replace(SendRoutes.SendConfirm, {
+    let action: any;
+    // TODO providerName
+    if (encodedTx) {
+      const params: SendConfirmParams = {
         sourceInfo,
         encodedTx,
-      }),
-    );
-  }, [encodedTx, navigation, sourceInfo]);
+        feeInfoEditable: true,
+        feeInfoUseFeeInTx: false,
+      };
+      // replace router to SendConfirm
+      action = StackActions.replace(SendRoutes.SendConfirm, params);
+    }
+    if (unsignedMessage) {
+      action = StackActions.replace(SendRoutes.SignMessageConfirm, {
+        sourceInfo,
+        unsignedMessage,
+      });
+    }
+    if (action) {
+      navigation.dispatch(action);
+    }
+  }, [encodedTx, navigation, sourceInfo, unsignedMessage]);
 
   return null;
 }

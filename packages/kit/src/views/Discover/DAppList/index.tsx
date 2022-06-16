@@ -6,7 +6,6 @@ import { ListRenderItem, useWindowDimensions } from 'react-native';
 
 import {
   Box,
-  Divider,
   FlatList,
   Pressable,
   Typography,
@@ -39,6 +38,9 @@ const Mobile: FC<SectionDataType> = ({ ...rest }) => {
           bgColor="surface-default"
           borderTopRadius={index === 0 ? '12px' : '0px'}
           borderRadius={index === data?.length - 1 ? '12px' : '0px'}
+          borderWidth={1}
+          borderColor="border-subdued"
+          borderTopWidth={index === 0 ? 1 : 0}
         >
           <Box flexDirection="row" flex={1} alignItems="center">
             <DAppIcon size={48} favicon={item.favicon} chain={item.chain} />
@@ -64,7 +66,6 @@ const Mobile: FC<SectionDataType> = ({ ...rest }) => {
         contentContainerStyle={{ paddingTop: 24, paddingBottom: 24 }}
         data={data}
         px="16px"
-        ItemSeparatorComponent={() => <Divider />}
         renderItem={renderItem}
         keyExtractor={(item, index) => `ListView${index}`}
       />
@@ -75,7 +76,8 @@ const Mobile: FC<SectionDataType> = ({ ...rest }) => {
 const Desktop: FC<SectionDataType> = ({ ...rest }) => {
   const { data, onItemSelect } = rest;
   const { width } = useWindowDimensions();
-  const screenWidth = width - 48;
+  // with sidebar
+  const screenWidth = width - 48 - 256;
   const minWidth = 250;
   const numColumns = Math.floor(screenWidth / minWidth);
   const cardWidth = screenWidth / numColumns;
@@ -88,34 +90,39 @@ const Desktop: FC<SectionDataType> = ({ ...rest }) => {
         minWidth={cardWidth}
         height={176}
         paddingX="8px"
+        justifyContent="center"
+        alignItems="center"
       >
         <Pressable
+          bgColor="surface-default"
+          flexDirection="column"
+          borderRadius="12px"
+          padding="16px"
+          borderWidth={1}
+          borderColor="border-subdued"
+          width={cardWidth - 16}
+          height={164}
+          _hover={{
+            bg: 'surface-hovered',
+          }}
           onPress={() => {
             if (onItemSelect) {
               onItemSelect(item);
             }
           }}
         >
-          <Box
-            bgColor="surface-default"
-            flexDirection="column"
-            borderRadius="12px"
-            padding="16px"
-            height={164}
+          <DAppIcon size={48} favicon={item.favicon} chain={item.chain} />
+          <Typography.Body2Strong numberOfLines={1} mt="12px">
+            {item.name}
+          </Typography.Body2Strong>
+          <Typography.Caption
+            numberOfLines={3}
+            mt="4px"
+            textAlign="left"
+            color="text-subdued"
           >
-            <DAppIcon size={48} favicon={item.favicon} chain={item.chain} />
-            <Typography.Body2Strong numberOfLines={1} mt="12px">
-              {item.name}
-            </Typography.Body2Strong>
-            <Typography.Caption
-              numberOfLines={3}
-              mt="4px"
-              textAlign="left"
-              color="text-subdued"
-            >
-              {item.subtitle}
-            </Typography.Caption>
-          </Box>
+            {item.subtitle}
+          </Typography.Caption>
         </Pressable>
       </Box>
     ),
@@ -158,11 +165,11 @@ const DAppList: FC = () => {
       (async () => {
         if (onItemSelect) {
           // iOS 弹窗无法展示在 modal 上面提前返回
-          if (platformEnv.isIOS) {
+          if (platformEnv.isNativeIOS) {
             navigation.goBack();
           }
           const agree = await onItemSelect(item);
-          if (agree && (platformEnv.isDesktop || platformEnv.isAndroid)) {
+          if (agree && (platformEnv.isDesktop || platformEnv.isNativeAndroid)) {
             navigation.goBack();
           }
         }

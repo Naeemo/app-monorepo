@@ -1,9 +1,11 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/naming-convention */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { useNavigation, useRoute } from '@react-navigation/core';
-import { RouteProp } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import BigNumber from 'bignumber.js';
+import { cloneDeep, first, last } from 'lodash';
 import { Column, Row } from 'native-base';
-import { Control, UseFormWatch } from 'react-hook-form';
+import { UseFormReturn } from 'react-hook-form';
 import { useIntl } from 'react-intl';
 
 import {
@@ -20,17 +22,28 @@ import {
   useIsVerticalLayout,
   useSafeAreaInsets,
 } from '@onekeyhq/components';
+import {
+  OneKeyError,
+  OneKeyErrorClassNames,
+  OneKeyValidatorError,
+} from '@onekeyhq/engine/src/errors';
 import { EIP1559Fee } from '@onekeyhq/engine/src/types/network';
+import { IEncodedTxEvm } from '@onekeyhq/engine/src/vaults/impl/evm/Vault';
 import {
   IFeeInfo,
   IFeeInfoPayload,
   IFeeInfoSelectedType,
   IFeeInfoUnit,
-} from '@onekeyhq/engine/src/types/vault';
+} from '@onekeyhq/engine/src/vaults/types';
+import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
 import debugLogger from '@onekeyhq/shared/src/logger/debugLogger';
 
 import { FormatCurrencyNative } from '../../components/Format';
+import { useActiveWalletAccount } from '../../hooks/redux';
+import { useDisableNavigationAnimation } from '../../hooks/useDisableNavigationAnimation';
+import { useFormOnChangeDebounced } from '../../hooks/useFormOnChangeDebounced';
 
+import { DecodeTxButtonTest } from './DecodeTxButtonTest';
 import { SendRoutes, SendRoutesParams } from './types';
 import {
   calculateTotalFeeNative,
@@ -38,7 +51,7 @@ import {
   useFeeInfoPayload,
 } from './useFeeInfoPayload';
 
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { StackNavigationProp } from '@react-navigation/stack';
 
 type FeeValues = {
   gasPrice: string;
@@ -55,65 +68,145 @@ enum FeeType {
 }
 
 type RouteProps = RouteProp<SendRoutesParams, SendRoutes.SendEditFee>;
-type NavigationProps = NativeStackNavigationProp<
+type NavigationProps = StackNavigationProp<
   SendRoutesParams,
   SendRoutes.SendEditFee
 >;
 
+const PRICE_UP_RATIO = 1.1;
+
+function selectMaxValue(
+  currentValue: string | undefined,
+  highPresetValue: string | undefined,
+  times = 1,
+) {
+  const currentValueBN = new BigNumber(currentValue ?? '').times(times);
+  const highPresetValueBN = new BigNumber(highPresetValue ?? '');
+  if (highPresetValueBN.isNaN() && currentValueBN.isNaN()) {
+    return '0';
+  }
+  if (highPresetValueBN.isNaN()) {
+    return currentValueBN.toFixed();
+  }
+  if (currentValueBN.isNaN()) {
+    return highPresetValueBN.toFixed();
+  }
+  return currentValueBN.isGreaterThan(highPresetValueBN)
+    ? currentValueBN.toFixed()
+    : highPresetValueBN.toFixed();
+}
+
 export function FeeSpeedLabel({ index }: { index: number | string }) {
   const intl = useIntl();
   const indexInt = parseInt(index as string, 10);
-  let title = intl.formatMessage({ id: 'content__normal' });
+  let title = `🚅  ${intl.formatMessage({ id: 'content__fast' })}`;
   if (indexInt === 0) {
-    title = intl.formatMessage({ id: 'content__slow' });
+    title = `🚗  ${intl.formatMessage({ id: 'content__normal' })}`;
   }
   if (indexInt === 1) {
-    title = intl.formatMessage({ id: 'content__normal' });
+    title = `🚅  ${intl.formatMessage({ id: 'content__fast' })}`;
   }
   if (indexInt === 2) {
-    title = intl.formatMessage({ id: 'content__fast' });
+    title = `🚀  ${intl.formatMessage({ id: 'content__rapid' })}`;
   }
   return <>{title}</>;
 }
 
-const CustomFeeForm = ({
-  feeInfoPayload,
-  control,
-  watch,
-}: {
-  feeInfoPayload: IFeeInfoPayload | null;
-  control: Control<FeeValues>;
-  watch: UseFormWatch<FeeValues>;
-}) => {
+export function FeeSpeedTime({ index }: { index: number | string }) {
   const intl = useIntl();
+  const indexInt = parseInt(index as string, 10);
+  let title = intl.formatMessage({ id: 'content__likely_less_than_15s' });
+  if (indexInt === 0) {
+    title = intl.formatMessage({ id: 'content__maybe_in_30s' });
+  }
+  if (indexInt === 1) {
+    title = intl.formatMessage({ id: 'content__likely_less_than_15s' });
+  }
+  if (indexInt === 2) {
+    title = intl.formatMessage({ id: 'content__very_likely_less_than_15s' });
+  }
+  return <>{title}</>;
+}
+
+function printError(error: OneKeyError | any) {
+  const e = error as OneKeyError;
+  console.error({
+    message: e.message,
+    key: e.key,
+    info: e.info,
+    className: e.className,
+  });
+}
+
+function FeeTipsWarning({ message }: { message: string }) {
+  if (!message) {
+    return null;
+  }
+  return (
+    <Typography.Caption color="text-warning">{message}</Typography.Caption>
+  );
+}
+
+export type ICustomFeeFormProps = {
+  feeInfoPayload: IFeeInfoPayload | null;
+  useFormReturn: UseFormReturn<FeeValues, any>;
+  autoConfirmAfterFeeSaved: boolean | undefined;
+};
+function CustomFeeForm(props: ICustomFeeFormProps) {
+  const { feeInfoPayload, useFormReturn, autoConfirmAfterFeeSaved } = props;
+  const { control, getValues } = useFormReturn;
+  const intl = useIntl();
+  const [totalFeeRange, setTotalFeeRange] = useState({
+    max: '0',
+    min: '0',
+  });
+  const selectedFeeInfo = feeInfoPayload?.selected;
+
   const feeSymbol = feeInfoPayload?.info?.symbol || '';
   const isEIP1559Fee = feeInfoPayload?.info?.eip1559;
-  const formValues = watch();
+  const lastPresetFeeInfo = last(feeInfoPayload?.info?.prices ?? []);
+  const fistPresetFeeInfo = first(feeInfoPayload?.info?.prices ?? []);
   const isSmallScreen = useIsVerticalLayout();
+  const { networkId } = useActiveWalletAccount();
 
-  // MIN: (baseFee + maxPriorityFeePerGas) * limit
-  // MAX: maxFeePerGas * limit
-  /*
-  baseFee: "0.000004248"
-  maxFeePerGas: "36.66000144"
-  maxPriorityFeePerGas: "36.65999719128"
-   */
+  const [gasLimitTip, setGasLimitTip] = useState<string | undefined>(undefined);
+  const [gasPriceTip, setGasPriceTip] = useState<string | undefined>(undefined);
+  const [maxPriorityFeeTip, setMaxPriorityFeeTip] = useState<
+    string | undefined
+  >(undefined);
+  const [maxFeeTip, setMaxFeeTip] = useState<string | undefined>(undefined);
 
-  let totalFeeRange = calculateTotalFeeRange({
-    limit: formValues.gasLimit,
-    price: formValues.gasPrice,
+  const updateTotalFeeRange = useCallback(() => {
+    let feeRange;
+    if (isEIP1559Fee) {
+      feeRange = calculateTotalFeeRange({
+        eip1559: true,
+        limit: getValues('gasLimit'),
+        price: {
+          baseFee: getValues('baseFee'),
+          maxFeePerGas: getValues('maxFeePerGas'),
+          maxPriorityFeePerGas: getValues('maxPriorityFeePerGas'),
+        },
+      });
+    } else {
+      feeRange = calculateTotalFeeRange({
+        limit: getValues('gasLimit'),
+        price: getValues('gasPrice'),
+      });
+    }
+    setTotalFeeRange(feeRange);
+  }, [getValues, isEIP1559Fee]);
+
+  useFormOnChangeDebounced<FeeValues>({
+    useFormReturn,
+    revalidate: true,
+    onChange: updateTotalFeeRange,
   });
-  if (isEIP1559Fee) {
-    totalFeeRange = calculateTotalFeeRange({
-      eip1559: true,
-      limit: formValues.gasLimit,
-      price: {
-        baseFee: formValues.baseFee,
-        maxFeePerGas: formValues.maxFeePerGas,
-        maxPriorityFeePerGas: formValues.maxPriorityFeePerGas,
-      },
-    });
-  }
+
+  useEffect(() => {
+    updateTotalFeeRange();
+  }, [updateTotalFeeRange]);
+
   return (
     <Form mt={8}>
       {isEIP1559Fee && (
@@ -124,16 +217,11 @@ const CustomFeeForm = ({
           control={control}
           name="baseFee"
           defaultValue=""
-          rules={{
-            required: intl.formatMessage({
-              id: 'form__gas_limit_invalid_min',
-            }),
-          }}
           formControlProps={{ isReadOnly: true }}
         >
           <Form.Input
             w="100%"
-            rightText="-"
+            rightText=""
             size={isSmallScreen ? 'xl' : undefined}
           />
         </Form.Item>
@@ -147,14 +235,66 @@ const CustomFeeForm = ({
           name="maxPriorityFeePerGas"
           defaultValue=""
           rules={{
-            required: intl.formatMessage({
-              id: 'form__max_priority_fee_invalid_min',
-            }),
+            validate: async (value) => {
+              const lowFee = fistPresetFeeInfo as EIP1559Fee;
+              const highFee = lastPresetFeeInfo as EIP1559Fee;
+
+              // getValues
+              try {
+                await backgroundApiProxy.validator.validateMaxPriortyFee({
+                  networkId,
+                  value,
+                  lowValue: lowFee?.maxPriorityFeePerGas,
+                  highValue: highFee?.maxPriorityFeePerGas,
+                  minValue:
+                    autoConfirmAfterFeeSaved && selectedFeeInfo?.custom?.price
+                      ? new BigNumber(
+                          (
+                            selectedFeeInfo?.custom?.price as
+                              | EIP1559Fee
+                              | undefined
+                          )?.maxPriorityFeePerGas as string,
+                        )
+                          .times(PRICE_UP_RATIO)
+                          .toFixed()
+                      : '0',
+                });
+                setMaxPriorityFeeTip(undefined);
+              } catch (error) {
+                printError(error);
+                const e = error as OneKeyError;
+
+                if (
+                  e?.className === OneKeyErrorClassNames.OneKeyValidatorError
+                ) {
+                  setMaxPriorityFeeTip(undefined);
+                  return intl.formatMessage(
+                    {
+                      id: e.key as any,
+                    },
+                    e.info,
+                  );
+                }
+                if (e?.className === OneKeyErrorClassNames.OneKeyValidatorTip) {
+                  setMaxPriorityFeeTip(
+                    intl.formatMessage(
+                      {
+                        id: e.key as any,
+                      },
+                      e.info,
+                    ),
+                  );
+                }
+              }
+              return true;
+            },
           }}
+          helpText={
+            maxPriorityFeeTip && <FeeTipsWarning message={maxPriorityFeeTip} />
+          }
         >
-          <Form.Input
-            w="100%"
-            rightText="-"
+          <Form.NumberInput
+            rightText=""
             size={isSmallScreen ? 'xl' : undefined}
           />
         </Form.Item>
@@ -168,14 +308,63 @@ const CustomFeeForm = ({
           name="maxFeePerGas"
           defaultValue=""
           rules={{
-            required: intl.formatMessage({
-              id: 'form__max_fee_invalid_too_low',
-            }),
+            validate: async (value) => {
+              const lowFee = fistPresetFeeInfo as EIP1559Fee;
+              const highFee = lastPresetFeeInfo as EIP1559Fee;
+              try {
+                await backgroundApiProxy.validator.validateMaxFee({
+                  networkId,
+                  maxPriorityFee: getValues('maxPriorityFeePerGas'),
+                  value,
+                  lowValue: lowFee?.maxFeePerGas,
+                  highValue: highFee?.maxFeePerGas,
+                  minValue:
+                    autoConfirmAfterFeeSaved && selectedFeeInfo?.custom?.price
+                      ? new BigNumber(
+                          (
+                            selectedFeeInfo?.custom?.price as
+                              | EIP1559Fee
+                              | undefined
+                          )?.maxFeePerGas as string,
+                        )
+                          .times(PRICE_UP_RATIO)
+                          .toFixed()
+                      : '0',
+                });
+                setMaxFeeTip(undefined);
+              } catch (error) {
+                printError(error);
+                const e = error as OneKeyValidatorError;
+                if (
+                  e?.className === OneKeyErrorClassNames.OneKeyValidatorError
+                ) {
+                  setMaxFeeTip(undefined);
+                  return intl.formatMessage(
+                    {
+                      id: e.key as any,
+                    },
+                    e.info,
+                  );
+                }
+
+                if (e?.className === OneKeyErrorClassNames.OneKeyValidatorTip) {
+                  setMaxFeeTip(
+                    intl.formatMessage(
+                      {
+                        id: e.key as any,
+                      },
+                      e.info,
+                    ),
+                  );
+                }
+              }
+              return true;
+            },
           }}
+          helpText={maxFeeTip && <FeeTipsWarning message={maxFeeTip} />}
         >
-          <Form.Input
-            w="100%"
-            rightText="-"
+          <Form.NumberInput
+            rightText=""
             size={isSmallScreen ? 'xl' : undefined}
           />
         </Form.Item>
@@ -186,10 +375,59 @@ const CustomFeeForm = ({
           label={intl.formatMessage({ id: 'content__gas_price' })}
           control={control}
           name="gasPrice"
-          // TODO required rules
+          rules={{
+            validate: async (value) => {
+              const lowValue = fistPresetFeeInfo as string;
+              const highValue = lastPresetFeeInfo as string;
+              try {
+                await backgroundApiProxy.validator.validateGasPrice({
+                  networkId,
+                  value,
+                  minValue:
+                    autoConfirmAfterFeeSaved && selectedFeeInfo?.custom?.price
+                      ? new BigNumber(selectedFeeInfo?.custom?.price as string)
+                          .times(PRICE_UP_RATIO)
+                          .toFixed()
+                      : '0',
+                  lowValue,
+                  highValue,
+                });
+                setGasPriceTip(undefined);
+              } catch (error) {
+                printError(error);
+                const e = error as OneKeyError;
+                if (
+                  e?.className === OneKeyErrorClassNames.OneKeyValidatorError
+                ) {
+                  setGasPriceTip(undefined);
+                  return intl.formatMessage(
+                    {
+                      id: e.key as any,
+                    },
+                    e.info,
+                  );
+                }
+                if (e?.className === OneKeyErrorClassNames.OneKeyValidatorTip) {
+                  setGasPriceTip(
+                    intl.formatMessage(
+                      {
+                        id: e.key as any,
+                      },
+                      e.info,
+                    ),
+                  );
+                }
+              }
+              return true;
+            },
+          }}
           defaultValue=""
+          helpText={gasPriceTip && <FeeTipsWarning message={gasPriceTip} />}
         >
-          <Form.Input w="100%" size={isSmallScreen ? 'xl' : undefined} />
+          <Form.NumberInput
+            size={isSmallScreen ? 'xl' : undefined}
+            decimal={3}
+          />
         </Form.Item>
       )}
 
@@ -197,10 +435,47 @@ const CustomFeeForm = ({
         label={intl.formatMessage({ id: 'content__gas_limit' })}
         control={control}
         name="gasLimit"
-        // TODO required rules
+        rules={{
+          validate: async (value) => {
+            const limitCalculated = feeInfoPayload?.info?.limit;
+            try {
+              await backgroundApiProxy.validator.validateGasLimit({
+                networkId,
+                value,
+                highValue: limitCalculated,
+              });
+              setGasLimitTip(undefined);
+            } catch (error) {
+              printError(error);
+              const e = error as OneKeyError;
+
+              if (e?.className === OneKeyErrorClassNames.OneKeyValidatorError) {
+                setGasLimitTip(undefined);
+                return intl.formatMessage(
+                  {
+                    id: e.key as any,
+                  },
+                  e.info,
+                );
+              }
+              if (e?.className === OneKeyErrorClassNames.OneKeyValidatorTip) {
+                setGasLimitTip(
+                  intl.formatMessage(
+                    {
+                      id: e.key as any,
+                    },
+                    e.info,
+                  ),
+                );
+              }
+            }
+            return true;
+          },
+        }}
         defaultValue=""
+        helpText={gasLimitTip && <FeeTipsWarning message={gasLimitTip} />}
       >
-        <Form.Input w="100%" size={isSmallScreen ? 'xl' : undefined} />
+        <Form.NumberInput size={isSmallScreen ? 'xl' : undefined} />
       </Form.Item>
 
       <Form.Item
@@ -217,18 +492,14 @@ const CustomFeeForm = ({
       </Form.Item>
     </Form>
   );
-};
+}
 
-const StandardFee = ({
-  feeInfoPayload,
-  value,
-  onChange,
-}: {
+export type IStandardFeeProps = {
   feeInfoPayload: IFeeInfoPayload | null;
   value: string;
   onChange: (v: string) => void;
-}) => {
-  const feeSymbol = feeInfoPayload?.info?.symbol || '';
+};
+function StandardFee({ feeInfoPayload, value, onChange }: IStandardFeeProps) {
   const gasList = useMemo(
     () => feeInfoPayload?.info?.prices ?? [],
     [feeInfoPayload?.info?.prices],
@@ -238,13 +509,42 @@ const StandardFee = ({
     const isEIP1559Fee = feeInfoPayload?.info?.eip1559;
     if (isEIP1559Fee) {
       return gasList.map((gas, index) => {
-        const gasInfo = gas as EIP1559Fee;
+        // const gasInfo = gas as EIP1559Fee;
+        const { min, max } = calculateTotalFeeRange({
+          eip1559: true,
+          limit: feeInfoPayload?.info?.limit,
+          price: gas,
+        });
+        const minFee = min;
+        const totalFeeNative = calculateTotalFeeNative({
+          amount: max,
+          info: feeInfoPayload?.info,
+        });
+
+        const minFeeNative = calculateTotalFeeNative({
+          amount: minFee,
+          info: feeInfoPayload?.info,
+        });
+
         return {
           value: index.toString(),
           title: <FeeSpeedLabel index={index} />,
-          titleSecond: `Base: ${gasInfo.baseFee}`,
-          describe: `${gasInfo.maxFeePerGas} ${feeSymbol}`,
-          describeSecond: `Max Priority: ${gasInfo.maxPriorityFeePerGas} ${feeSymbol}`,
+          titleSecond: <FeeSpeedTime index={index} />,
+          describe: (
+            <FormatCurrencyNative
+              value={minFeeNative}
+              render={(ele) => <>~ {!minFeeNative ? '-' : ele}</>}
+            />
+          ),
+          describeSecond: (
+            <FormatCurrencyNative
+              value={totalFeeNative}
+              render={(ele) => <>Max Fee: {!totalFeeNative ? '-' : ele}</>}
+            />
+          ),
+          describeThird: `${totalFeeNative}${
+            feeInfoPayload.info.nativeSymbol ?? ''
+          }`,
         };
       });
     }
@@ -262,21 +562,21 @@ const StandardFee = ({
       return {
         value: index.toString(),
         title: <FeeSpeedLabel index={index} />,
-        titleSecond: `≈ ${totalFee} ${feeSymbol}`,
-        describe: `${gas as string} ${feeSymbol}`,
-        describeSecond: (
+        titleSecond: <FeeSpeedTime index={index} />,
+        describe: (
           <FormatCurrencyNative
             value={totalFeeNative}
-            render={(ele) => (
-              <Typography.Body2 mt={1} color="text-subdued">
-                {!totalFeeNative ? '-' : ele}
-              </Typography.Body2>
-            )}
+            render={(ele) => <>~ {!totalFeeNative ? '-' : ele}</>}
           />
         ),
+        describeSecond: `${totalFeeNative}${
+          feeInfoPayload?.info?.nativeSymbol
+            ? ` ${feeInfoPayload?.info?.nativeSymbol}`
+            : ''
+        }`,
       };
     });
-  }, [feeInfoPayload?.info, feeSymbol, gasList]);
+  }, [feeInfoPayload?.info, gasList]);
 
   return (
     <RadioFee
@@ -288,15 +588,13 @@ const StandardFee = ({
       onChange={onChange}
     />
   );
-};
+}
 
-const EditFeeTabs = ({
-  onChange,
-  type,
-}: {
+export type IEditFeeTabsProps = {
   type: FeeType;
   onChange: (type: string) => void;
-}) => {
+};
+function EditFeeTabs({ onChange, type }: IEditFeeTabsProps) {
   const intl = useIntl();
   return (
     <SegmentedControl
@@ -314,16 +612,36 @@ const EditFeeTabs = ({
       onChange={onChange}
     />
   );
-};
-const TransactionEditFee = ({ ...rest }) => {
+}
+
+function ScreenSendEditFee({ ...rest }) {
   const { trigger } = rest;
   const intl = useIntl();
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<RouteProps>();
-  const { encodedTx, backRouteName } = route.params;
-  const { feeInfoPayload, getSelectedFeeInfoUnit } = useFeeInfoPayload({
-    encodedTx,
+  // autoConfirmAfterFeeSaved=true   speedUp & cancel
+  const { encodedTx, autoConfirmAfterFeeSaved } = route.params;
+
+  useDisableNavigationAnimation({
+    condition: !!autoConfirmAfterFeeSaved,
   });
+
+  const encodedTxForFeeInfo = useMemo(() => {
+    if (autoConfirmAfterFeeSaved) {
+      const tx = cloneDeep(encodedTx) as IEncodedTxEvm;
+      // delete origin tx limit when speedUp or cancel,
+      //      force rpc api to re-calculate latest limit
+      delete tx.gasLimit;
+      delete tx.gas;
+      return tx;
+    }
+    return encodedTx as IEncodedTxEvm;
+  }, [autoConfirmAfterFeeSaved, encodedTx]);
+  const { feeInfoPayload, feeInfoLoading, getSelectedFeeInfoUnit } =
+    useFeeInfoPayload({
+      encodedTx: encodedTxForFeeInfo,
+      fetchAnyway: true,
+    });
   const isEIP1559Fee = feeInfoPayload?.info?.eip1559;
 
   useEffect(() => {
@@ -334,9 +652,11 @@ const TransactionEditFee = ({ ...rest }) => {
   const [radioValue, setRadioValue] = useState('');
 
   const isSmallScreen = useIsVerticalLayout();
-  const { control, handleSubmit, setValue, watch } = useForm<FeeValues>({
+  const useFormReturn = useForm<FeeValues>({
+    mode: 'onBlur',
     reValidateMode: 'onBlur',
   });
+  const { handleSubmit, setValue, trigger: formTrigger } = useFormReturn;
   const onSubmit = handleSubmit((data) => {
     let type: IFeeInfoSelectedType =
       feeType === FeeType.advanced ? 'custom' : 'preset';
@@ -344,12 +664,12 @@ const TransactionEditFee = ({ ...rest }) => {
     if (!radioValue && type === 'preset') {
       type = 'custom';
     }
-    let priceInfo: string | EIP1559Fee = data.gasPrice;
+    let priceInfo: string | EIP1559Fee = data.gasPrice || '0';
     if (isEIP1559Fee) {
       priceInfo = {
-        baseFee: data.baseFee,
-        maxPriorityFeePerGas: data.maxPriorityFeePerGas,
-        maxFeePerGas: data.maxFeePerGas,
+        baseFee: data.baseFee || '0',
+        maxPriorityFeePerGas: data.maxPriorityFeePerGas || '0',
+        maxFeePerGas: data.maxFeePerGas || '0',
       };
     }
     const feeInfoSelected = {
@@ -358,19 +678,32 @@ const TransactionEditFee = ({ ...rest }) => {
       custom: {
         eip1559: isEIP1559Fee,
         price: priceInfo,
-        limit: data.gasLimit,
+        limit: data.gasLimit || '0',
       },
     };
     debugLogger.sendTx('SendEditFee Confirm >>>> ', feeInfoSelected);
-    if (backRouteName) {
-      navigation.navigate({
-        merge: true,
-        name: backRouteName,
-        params: {
-          feeInfoSelected,
-        },
+    const { routes, index } = navigation.getState();
+    const prevRouteName = routes[index - 1]?.name;
+
+    if (autoConfirmAfterFeeSaved) {
+      return navigation.replace(SendRoutes.SendConfirm, {
+        encodedTx,
+        actionType: 'cancel',
+        feeInfoSelected,
+        autoConfirmAfterFeeSaved,
+        feeInfoUseFeeInTx: false,
+        feeInfoEditable: true,
       });
     }
+
+    return navigation.navigate({
+      merge: true,
+      name: prevRouteName || SendRoutes.SendConfirm,
+      params: {
+        feeInfoSelected,
+        autoConfirmAfterFeeSaved,
+      },
+    });
   });
 
   const setFormValuesFromFeeInfo = useCallback(
@@ -414,12 +747,22 @@ const TransactionEditFee = ({ ...rest }) => {
   ]);
 
   useEffect(() => {
-    if (!feeInfoPayload) {
-      return;
+    if (feeType === FeeType.advanced) {
+      formTrigger();
     }
+  }, [feeType, formTrigger]);
+
+  useEffect(() => {
     const selected = feeInfoPayload?.selected;
-    const type = selected?.type ?? 'preset';
-    if (type === 'preset') {
+    let type = selected?.type ?? 'preset';
+    if (
+      !feeInfoPayload ||
+      !feeInfoPayload?.info?.prices?.length ||
+      autoConfirmAfterFeeSaved
+    ) {
+      type = 'custom';
+    }
+    if (feeInfoPayload && type === 'preset') {
       let presetValue = selected?.preset || '1';
       // preset fix / presetFix
       if (feeInfoPayload?.info?.prices?.length < 2) {
@@ -427,15 +770,50 @@ const TransactionEditFee = ({ ...rest }) => {
       }
       setRadioValue(presetValue);
       setFeeType(FeeType.standard);
-    }
-    if (type === 'custom') {
-      const customValues = selected?.custom;
+    } else if (type === 'custom') {
+      const customValues = cloneDeep(selected?.custom ?? {});
       setFeeType(FeeType.advanced);
       if (customValues) {
+        // build fee customValues for speedUp & cancel tx
+        if (autoConfirmAfterFeeSaved) {
+          const highPriceData = last(feeInfoPayload?.info?.prices ?? []);
+          // TODO set limit to feeInfoPayload?.info?.limit (21000 in L1) if cancel action
+          customValues.limit = selectMaxValue(
+            customValues.limit,
+            feeInfoPayload?.info?.limit,
+            1,
+          );
+          if (customValues?.eip1559) {
+            const eip1559Price = customValues.price as EIP1559Fee;
+            if (eip1559Price) {
+              const highPriceInfo = highPriceData as EIP1559Fee | undefined;
+              eip1559Price.baseFee =
+                highPriceInfo?.baseFee ?? eip1559Price.baseFee;
+              eip1559Price.maxFeePerGas = selectMaxValue(
+                eip1559Price.maxFeePerGas,
+                highPriceInfo?.maxFeePerGas,
+                PRICE_UP_RATIO,
+              );
+              eip1559Price.maxPriorityFeePerGas = selectMaxValue(
+                eip1559Price.maxPriorityFeePerGas,
+                highPriceInfo?.maxPriorityFeePerGas,
+                PRICE_UP_RATIO,
+              );
+            }
+          } else {
+            const highPriceInfo = highPriceData as string;
+            customValues.price = selectMaxValue(
+              customValues.price as string,
+              highPriceInfo,
+              PRICE_UP_RATIO,
+            );
+          }
+        }
         setFormValuesFromFeeInfo(customValues);
       }
     }
   }, [
+    autoConfirmAfterFeeSaved,
     feeInfoPayload,
     feeInfoPayload?.selected,
     feeInfoPayload?.selected.type,
@@ -473,8 +851,25 @@ const TransactionEditFee = ({ ...rest }) => {
       <Spinner size="lg" />
     </Center>
   );
-  if (feeInfoPayload && feeType) {
-    content = (
+
+  if (feeType && !feeInfoLoading) {
+    const customFeeForm = (
+      <CustomFeeForm
+        autoConfirmAfterFeeSaved={autoConfirmAfterFeeSaved}
+        feeInfoPayload={feeInfoPayload}
+        useFormReturn={useFormReturn}
+      />
+    );
+    const presetFeeForm = (
+      <StandardFee
+        feeInfoPayload={feeInfoPayload}
+        value={radioValue}
+        onChange={(value) => {
+          setRadioValue(value);
+        }}
+      />
+    );
+    content = feeInfoPayload ? (
       <>
         <EditFeeTabs
           type={feeType}
@@ -483,24 +878,21 @@ const TransactionEditFee = ({ ...rest }) => {
           }}
         />
         <Box>
-          {feeType === FeeType.standard ? (
-            <StandardFee
-              feeInfoPayload={feeInfoPayload}
-              value={radioValue}
-              onChange={(value) => {
-                setRadioValue(value);
-              }}
-            />
-          ) : (
-            <CustomFeeForm
-              feeInfoPayload={feeInfoPayload}
-              control={control}
-              watch={watch}
-            />
-          )}
+          {feeType === FeeType.standard ? presetFeeForm : customFeeForm}
         </Box>
       </>
+    ) : (
+      <>
+        <Box>{customFeeForm}</Box>
+      </>
     );
+    if (feeInfoPayload?.info?.customDisabled) {
+      content = (
+        <>
+          <Box>{presetFeeForm}</Box>
+        </>
+      );
+    }
   }
 
   return (
@@ -512,10 +904,15 @@ const TransactionEditFee = ({ ...rest }) => {
       header={intl.formatMessage({ id: 'action__edit_fee' })}
       footer={footer}
       scrollViewProps={{
-        children: content,
+        children: (
+          <>
+            {content}
+            <DecodeTxButtonTest encodedTx={encodedTx} />
+          </>
+        ),
       }}
     />
   );
-};
+}
 
-export default TransactionEditFee;
+export default React.memo(ScreenSendEditFee);

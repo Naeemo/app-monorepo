@@ -1,20 +1,27 @@
 import React, { FC, useState } from 'react';
 
-import { Box, Column, IconButton, Alert as NBAlert, Row } from 'native-base';
+import { Box } from 'native-base';
 
 import Icon, { ICON_NAMES } from '../Icon';
+import IconButton from '../IconButton';
+import Pressable from '../Pressable';
 import { useThemeValue } from '../Provider/hooks';
 import { ThemeValues } from '../Provider/theme';
 import Typography from '../Typography';
+import VStack from '../VStack';
 
 type AlertType = 'info' | 'warn' | 'error' | 'success' | 'SeriousWarning';
+type ActionType = 'bottom' | 'right';
 
 export type AlertProps = {
-  title: string;
+  title: string | React.ReactNode;
   description?: string;
   alertType: AlertType;
-  expand?: boolean;
   dismiss?: boolean;
+  onDismiss?: () => void;
+  action?: string;
+  actionType?: ActionType;
+  onAction?: () => void;
 };
 
 type AlertTypeProps = {
@@ -79,59 +86,92 @@ const Alert: FC<AlertProps> = ({
   title,
   description,
   alertType,
-  expand = true,
+  onDismiss,
   dismiss = true,
+  action,
+  actionType,
+  onAction,
 }) => {
   const alertTypeProps = alertPropWithType(alertType);
   const borderColor = useThemeValue(alertTypeProps.borderColor);
   const bgColor = useThemeValue(alertTypeProps.bgColor);
-
   const [display, setDisplay] = useState(true);
 
-  return (
-    <NBAlert
-      display={display ? 'flex' : 'none'}
-      w="100%"
-      borderRadius={12}
-      borderWidth="1px"
-      borderColor={borderColor}
-      bgColor={bgColor}
-      padding="16px"
-    >
-      <Column w="100%">
-        <Row space={2} alignItems="center" justifyContent="space-between">
-          <Row space="12px" flex="1">
-            <Box>
-              <Icon
-                size={20}
-                name={alertTypeProps.iconName}
-                color={alertTypeProps.iconColor}
-              />
+  return display ? (
+    <Box position="relative">
+      <Box
+        position="relative"
+        display="flex"
+        flexDirection="row"
+        w="100%"
+        borderRadius="12"
+        borderWidth="1px"
+        borderColor={borderColor}
+        bgColor={bgColor}
+        pl="4"
+        pr={dismiss ? '2.5' : '4'}
+        pb="2.5"
+        pt="2.5"
+        alignItems="flex-start"
+      >
+        <Box flex="1">
+          <Box
+            flexDirection="row"
+            alignItems="center"
+            justifyContent="space-between"
+            minH="8"
+            w="full"
+          >
+            <Box flexDirection="row" flex={1}>
+              <Box>
+                <Icon
+                  size={20}
+                  name={alertTypeProps.iconName}
+                  color={alertTypeProps.iconColor}
+                />
+              </Box>
+              <Typography.Body2Strong ml="3" flex={1}>
+                {title}
+              </Typography.Body2Strong>
             </Box>
-            <Typography.Body2Strong flex={1}>{title}</Typography.Body2Strong>
-          </Row>
-          <IconButton
-            padding="2px"
-            display={dismiss ? 'flex' : 'none'}
-            icon={
-              <Icon
-                size={12}
-                name="CloseOutline"
-                color={alertTypeProps.iconColor}
-              />
-            }
-            onPress={() => {
-              setDisplay(false);
-            }}
-          />
-        </Row>
-
-        <Box display={expand ? 'flex' : 'none'} pl="32px" pt="8px">
-          <Typography.Body2>{description}</Typography.Body2>
+          </Box>
+          {description || (action && actionType === 'bottom') ? (
+            <VStack pl="8" pt="1" mb="1" space="4">
+              {description ? (
+                <Typography.Body2>{description}</Typography.Body2>
+              ) : null}
+              {action && actionType === 'bottom' ? (
+                <Pressable onPress={onAction}>
+                  <Typography.Body2Underline>
+                    {action}
+                  </Typography.Body2Underline>
+                </Pressable>
+              ) : null}
+            </VStack>
+          ) : null}
         </Box>
-      </Column>
-    </NBAlert>
-  );
+        <Box flexDirection="row" alignItems="center" h="8">
+          {actionType === 'right' && action ? (
+            <Pressable onPress={onAction}>
+              <Typography.Body2Underline>{action}</Typography.Body2Underline>
+            </Pressable>
+          ) : null}
+          {dismiss ? (
+            <IconButton
+              size="sm"
+              type="plain"
+              name="CloseOutline"
+              iconColor={alertTypeProps.iconColor}
+              onPress={() => {
+                onDismiss?.();
+                setDisplay(false);
+              }}
+            />
+          ) : null}
+        </Box>
+      </Box>
+    </Box>
+  ) : null;
 };
 
 export default Alert;

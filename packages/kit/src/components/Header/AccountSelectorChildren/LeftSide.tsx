@@ -1,12 +1,7 @@
-/* eslint-disable  @typescript-eslint/no-unused-vars */
 import React, { ComponentProps, FC } from 'react';
-
-import { useNavigation } from '@react-navigation/core';
 
 import {
   Box,
-  Center,
-  Divider,
   HStack,
   IconButton,
   Pressable,
@@ -16,23 +11,16 @@ import {
 } from '@onekeyhq/components';
 import { Wallet } from '@onekeyhq/engine/src/types/wallet';
 import { useRuntime } from '@onekeyhq/kit/src/hooks/redux';
-import {
-  CreateWalletModalRoutes,
-  CreateWalletRoutesParams,
-} from '@onekeyhq/kit/src/routes';
-import {
-  ModalRoutes,
-  ModalScreenProps,
-  RootRoutes,
-} from '@onekeyhq/kit/src/routes/types';
+import { CreateWalletModalRoutes } from '@onekeyhq/kit/src/routes';
+import { ModalRoutes, RootRoutes } from '@onekeyhq/kit/src/routes/types';
 
 import { setHaptics } from '../../../hooks/setHaptics';
 import useAppNavigation from '../../../hooks/useAppNavigation';
+import { getDeviceTypeByDeviceId } from '../../../utils/device/ble/OnekeyHardware';
 import WalletAvatar from '../WalletAvatar';
 
 import type { AccountType } from './index';
 
-type NavigationProps = ModalScreenProps<CreateWalletRoutesParams>;
 type WalletItemProps = {
   isSelected?: boolean;
   walletType?: AccountType;
@@ -80,7 +68,6 @@ const LeftSide: FC<LeftSideProps> = ({ selectedWallet, setSelectedWallet }) => {
   const { wallets } = useRuntime();
 
   const importedWallet = wallets.filter((w) => w.type === 'imported')[0];
-  const watchingWallet = wallets.filter((w) => w.type === 'watching')[0];
 
   const { bottom } = useSafeAreaInsets();
 
@@ -92,46 +79,42 @@ const LeftSide: FC<LeftSideProps> = ({ selectedWallet, setSelectedWallet }) => {
           <VStack space={2}>
             {wallets
               .filter((wallet) => wallet.type === 'hd')
-              .map((wallet) => (
+              .map((wallet, index) => (
                 <WalletItem
-                  key={wallet.id}
+                  key={`${wallet.id}${index}`}
                   onPress={() => {
                     setHaptics();
                     setSelectedWallet(wallet);
                   }}
                   isSelected={selectedWallet?.id === wallet.id}
-                  avatarBgColor="#55A9D9"
+                  walletImage="hd"
+                  avatar={wallet.avatar}
                 />
               ))}
-
-            {wallets.some((wallet) => wallet.type === 'hd') && (
-              <Center pt={2} pb={4}>
-                <Divider bgColor="border-default" w={6} />
-              </Center>
-            )}
+            {wallets.some((wallet) => wallet.type === 'hd') && <Box h={4} />}
           </VStack>
           {/* Hardware Wallet */}
           <VStack space={2}>
             {wallets
               .filter((wallet) => wallet.type === 'hw')
-              .map((wallet) => (
+              .map((wallet, index) => (
                 <WalletItem
+                  key={`${wallet.id}${index}`}
                   onPress={() => {
                     setHaptics();
                     setSelectedWallet(wallet);
                   }}
                   isSelected={selectedWallet?.id === wallet.id}
-                  avatarBgColor="#FFE0DF"
+                  walletImage={wallet.type}
+                  avatar={wallet.avatar}
                   walletType="hw"
+                  hwWalletType={getDeviceTypeByDeviceId(
+                    wallet.associatedDevice,
+                  )}
                 />
               ))}
-
-            {wallets.some((wallet) => wallet.type === 'hw') && (
-              <Center pt={2} pb={4}>
-                <Divider bgColor="border-default" w={6} />
-              </Center>
-            )}
           </VStack>
+          {wallets.some((wallet) => wallet.type === 'hw') && <Box h={4} />}
           {/* Imported or watched wallet */}
           <VStack space={2}>
             {importedWallet ? (
@@ -163,8 +146,9 @@ const LeftSide: FC<LeftSideProps> = ({ selectedWallet, setSelectedWallet }) => {
       </ScrollView>
       <Box p={2}>
         <IconButton
-          type="plain"
-          name="PlusOutline"
+          type="primary"
+          name="WalletAddOutline"
+          circle
           size="xl"
           onPress={() =>
             navigation.navigate(RootRoutes.Modal, {

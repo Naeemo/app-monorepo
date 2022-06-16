@@ -4,18 +4,21 @@ import React, { FC, useCallback, useEffect, useMemo } from 'react';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/core';
 import { useIntl } from 'react-intl';
 
-import { Box, Form, Modal, Typography, useForm } from '@onekeyhq/components';
+import { Box, Form, Modal, useForm, useToast } from '@onekeyhq/components';
 import { LocaleIds } from '@onekeyhq/components/src/locale';
 import Pressable from '@onekeyhq/components/src/Pressable/Pressable';
+import { useIsVerticalLayout } from '@onekeyhq/components/src/Provider/hooks';
+import { Text } from '@onekeyhq/components/src/Typography';
 import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
 import FormChainSelector from '@onekeyhq/kit/src/components/Form/ChainSelector';
-import { useDrawer, useToast } from '@onekeyhq/kit/src/hooks';
-import { useRuntime } from '@onekeyhq/kit/src/hooks/redux';
+import { useGeneral, useRuntime } from '@onekeyhq/kit/src/hooks/redux';
 import {
   CreateAccountModalRoutes,
   CreateAccountRoutesParams,
 } from '@onekeyhq/kit/src/routes';
 import { ModalScreenProps } from '@onekeyhq/kit/src/routes/types';
+
+import { setAccountIsBeingCreated } from '../../../store/reducers/data';
 
 type PrivateKeyFormValues = {
   network: string;
@@ -35,10 +38,10 @@ type RouteProps = RouteProp<
 const CreateAccount: FC<CreateAccountProps> = ({ onClose }) => {
   const intl = useIntl();
   const toast = useToast();
-  const { closeDrawer } = useDrawer();
   const { dispatch, serviceAccount } = backgroundApiProxy;
   const { control, handleSubmit, getValues, setValue, watch } =
     useForm<PrivateKeyFormValues>({ defaultValues: { name: '' } });
+  const { activeNetworkId } = useGeneral();
 
   const navigation = useNavigation<NavigationProps['navigation']>();
   const route = useRoute<RouteProps>();
@@ -49,11 +52,34 @@ const CreateAccount: FC<CreateAccountProps> = ({ onClose }) => {
     () => wallets.find((wallet) => wallet.id === selectedWalletId),
     [selectedWalletId, wallets],
   );
-  const watchNetwork = watch('network', (networks ?? [])[0].id);
+  const watchNetwork = watch(
+    'network',
+    activeNetworkId ?? (networks ?? [])?.[0]?.id,
+  );
+  const selectableNetworks = networks
+    .filter((network) => {
+      if (wallet?.type === 'hw') {
+        return network.settings.hardwareAccountEnabled;
+      }
+      if (wallet?.type === 'imported') {
+        return network.settings.importedAccountEnabled;
+      }
+      if (wallet?.type === 'watching') {
+        return network.settings.watchingAccountEnabled;
+      }
+      return true;
+    })
+    .map((network) => network.id);
+  const isSmallScreen = useIsVerticalLayout();
 
   useEffect(() => {
-    const selectedNetwork =
-      networks?.find((n) => n.id === watchNetwork) ?? null;
+    const selectedNetwork = networks?.find(
+      (n) =>
+        n.id ===
+        (selectableNetworks.includes(watchNetwork)
+          ? watchNetwork
+          : selectableNetworks[0]),
+    );
     if (selectedNetwork) {
       const { prefix, category } = selectedNetwork.accountNameInfo.default;
       if (typeof prefix !== 'undefined') {
@@ -61,37 +87,36 @@ const CreateAccount: FC<CreateAccountProps> = ({ onClose }) => {
         setValue('name', `${prefix} #${id + 1}`);
       }
     }
-  }, [wallet, networks, watchNetwork, setValue]);
+  }, [wallet, networks, watchNetwork, selectableNetworks, setValue]);
 
   const authenticationDone = useCallback(
-    async (password: string) => {
+    (password: string) => {
       const network = getValues('network');
       const name = getValues('name');
-      try {
-        await serviceAccount.addHDAccounts(
-          password,
-          selectedWalletId,
-          network,
-          undefined,
-          [name],
-        );
-      } catch (e) {
-        const errorKey = (e as { key: LocaleIds }).key;
-        toast.show({
-          title: intl.formatMessage({ id: errorKey }),
-        });
-      }
-      closeDrawer();
-      if (navigation.canGoBack()) {
-        navigation.getParent()?.goBack?.();
-      }
+      backgroundApiProxy.dispatch(setAccountIsBeingCreated(true));
+      setTimeout(() => {
+        serviceAccount
+          .addHDAccounts(password, selectedWalletId, network, undefined, [name])
+          .catch((e) => {
+            console.error(e);
+            const errorKey = (e as { key: LocaleIds }).key;
+            toast.show({
+              title: intl.formatMessage({ id: errorKey }),
+            });
+          })
+          .finally(() => {
+            backgroundApiProxy.dispatch(setAccountIsBeingCreated(false));
+          });
+      }, 10);
+      navigation.getParent()?.goBack?.();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [toast, getValues, selectedWalletId, dispatch, intl, networks, closeDrawer],
+    [toast, getValues, selectedWalletId, dispatch, intl, networks],
   );
 
   const onSubmit = handleSubmit(() => {
     navigation.navigate(CreateAccountModalRoutes.CreateAccountAuthentication, {
+      walletId: selectedWalletId,
       onDone: authenticationDone,
     });
   });
@@ -107,7 +132,11 @@ const CreateAccount: FC<CreateAccountProps> = ({ onClose }) => {
       scrollViewProps={{
         children: (
           <Form w="full" zIndex={999} h="full">
-            <FormChainSelector control={control} name="network" />
+            <FormChainSelector
+              selectableNetworks={selectableNetworks}
+              control={control}
+              name="network"
+            />
             <Form.Item
               name="name"
               rules={{
@@ -124,19 +153,23 @@ const CreateAccount: FC<CreateAccountProps> = ({ onClose }) => {
               label={intl.formatMessage({ id: 'form__account_name' })}
               control={control}
             >
-              <Form.Input />
+              <Form.Input size={isSmallScreen ? 'xl' : 'default'} />
             </Form.Item>
-            <Box alignItems="center" mt="6">
-              <Typography.Body2>
+            <Box alignItems="center">
+              <Text
+                typography={{ sm: 'Body1', md: 'Body2' }}
+                color="text-subdued"
+              >
                 {intl.formatMessage({
                   id: 'account__restore_a_previously_used_account',
                 })}
-              </Typography.Body2>
+              </Text>
               <Pressable
                 onPress={() => {
                   navigation.navigate(
                     CreateAccountModalRoutes.CreateAccountAuthentication,
                     {
+                      walletId: selectedWalletId,
                       onDone: (password) => {
                         const network = getValues('network');
                         navigation.navigate(
@@ -148,11 +181,14 @@ const CreateAccount: FC<CreateAccountProps> = ({ onClose }) => {
                   );
                 }}
               >
-                <Typography.Body2Underline color="action-primary-default">
+                <Text
+                  typography={{ sm: 'Body1', md: 'Body2' }}
+                  color="action-primary-default"
+                >
                   {intl.formatMessage({
                     id: 'action__recover_accounts',
                   })}
-                </Typography.Body2Underline>
+                </Text>
               </Pressable>
             </Box>
           </Form>

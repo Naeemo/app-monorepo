@@ -1,19 +1,18 @@
 import React from 'react';
 
 import { useIsVerticalLayout } from '@onekeyhq/components';
-import { Transaction } from '@onekeyhq/engine/src/types/covalent';
-import TransactionDetails from '@onekeyhq/kit/src/views/TransactionDetails';
+import { EVMDecodedItem } from '@onekeyhq/engine/src/vaults/impl/evm/decoder/decoder';
+import HistoryDetail from '@onekeyhq/kit/src/views/TransactionDetails/HistoryDetail';
 
 import createStackNavigator from './createStackNavigator';
 
 export enum TransactionDetailModalRoutes {
-  TransactionDetailModal = 'TransactionDetailModal',
+  HistoryDetailModal = 'HistoryDetailModal',
 }
 
 export type TransactionDetailRoutesParams = {
-  [TransactionDetailModalRoutes.TransactionDetailModal]: {
-    txHash: string | null;
-    tx: Transaction | null;
+  [TransactionDetailModalRoutes.HistoryDetailModal]: {
+    decodedItem: EVMDecodedItem;
   };
 };
 
@@ -22,8 +21,8 @@ const TransactionDetailNavigator =
 
 const modalRoutes = [
   {
-    name: TransactionDetailModalRoutes.TransactionDetailModal,
-    component: TransactionDetails,
+    name: TransactionDetailModalRoutes.HistoryDetailModal,
+    component: HistoryDetail,
   },
 ];
 

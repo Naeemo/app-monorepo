@@ -12,26 +12,32 @@ import {
   CardInfo,
 } from '@onekeyhq/app/src/hardware/OnekeyLite/types';
 import { ButtonType } from '@onekeyhq/components/src/Button';
-
-import HardwareConnect, { OperateType } from '../../BaseConnect';
-import ErrorDialog from '../ErrorDialog';
 import {
   OnekeyLiteChangePinModalRoutes,
   OnekeyLiteChangePinRoutesParams,
-} from '../routes';
+} from '@onekeyhq/kit/src/routes';
+import { ModalScreenProps } from '@onekeyhq/kit/src/routes/types';
+
+import { SkipAppLock } from '../../../../components/AppLock';
+import HardwareConnect, { OperateType } from '../../BaseConnect';
+import ErrorDialog from '../ErrorDialog';
 
 type RouteProps = RouteProp<
   OnekeyLiteChangePinRoutesParams,
   OnekeyLiteChangePinModalRoutes.OnekeyLiteChangePinModal
 >;
 
+type NavigationProps = ModalScreenProps<OnekeyLiteChangePinRoutesParams>;
+
 const ChangePin: FC = () => {
   const intl = useIntl();
-  const navigation = useNavigation();
-  const { oldPin, newPin, onRetry } = useRoute<RouteProps>().params;
+  const navigation = useNavigation<NavigationProps['navigation']>();
+  const { oldPin, newPin } = useRoute<RouteProps>().params;
 
   const [pinRetryCount, setPinRetryCount] = useState('');
-  const [title] = useState('Onekey Lite');
+  const [title] = useState(
+    intl.formatMessage({ id: 'app__hardware_name_onekey_lite' }),
+  );
   const [actionPressStyle, setActionPressStyle] =
     useState<ButtonType>('primary');
   const [actionPressContent, setActionPressContent] = useState(
@@ -45,6 +51,11 @@ const ChangePin: FC = () => {
   );
   const [operateType, setOperateType] = useState<OperateType>('guide');
   const [errorCode, setErrorCode] = useState(0);
+
+  const goBack = () => {
+    const inst = navigation.getParent() || navigation;
+    inst.goBack();
+  };
 
   const stateNfcSearch = () => {
     setActionPressStyle('basic');
@@ -111,11 +122,11 @@ const ChangePin: FC = () => {
       case 'transfer':
         if (Platform.OS === 'ios') return;
         OnekeyLite.cancel();
-        navigation.goBack();
+        goBack();
         break;
 
       default:
-        navigation.goBack();
+        goBack();
         break;
     }
   };
@@ -152,6 +163,7 @@ const ChangePin: FC = () => {
 
   return (
     <>
+      <SkipAppLock />
       <HardwareConnect
         title={title}
         connectType="ble"
@@ -166,14 +178,18 @@ const ChangePin: FC = () => {
       <ErrorDialog
         code={errorCode}
         pinRetryCount={pinRetryCount}
-        onRetry={() => onRetry?.()}
+        onRetry={() =>
+          navigation.replace(
+            OnekeyLiteChangePinModalRoutes.OnekeyLiteChangePinInputPinModal,
+          )
+        }
         onRetryConnect={() => startNfcScan()}
         onExit={() => {
-          navigation.goBack();
+          goBack();
         }}
         onIntoNfcSetting={() => {
           OnekeyLite.intoSetting();
-          navigation.goBack();
+          goBack();
         }}
         onDialogClose={() => setErrorCode(0)}
       />

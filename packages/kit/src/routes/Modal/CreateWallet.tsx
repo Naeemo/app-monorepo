@@ -9,8 +9,11 @@ import AddImportedAccountDone from '@onekeyhq/kit/src/views/CreateWallet/Account
 import AddWatchAccount from '@onekeyhq/kit/src/views/CreateWallet/Account/AddWatchAccount';
 import AddExistingWallet from '@onekeyhq/kit/src/views/CreateWallet/AddExistingWallet';
 import AppWallet from '@onekeyhq/kit/src/views/CreateWallet/AppWallet/AppWallet';
+import AttentionsView from '@onekeyhq/kit/src/views/CreateWallet/AppWallet/AttentionsView';
 import AppWalletDone from '@onekeyhq/kit/src/views/CreateWallet/AppWallet/Done';
 import ImportWallet from '@onekeyhq/kit/src/views/CreateWallet/AppWallet/ImportWallet';
+import Mnemonic from '@onekeyhq/kit/src/views/CreateWallet/AppWallet/Mnemonic';
+import NewWallet from '@onekeyhq/kit/src/views/CreateWallet/AppWallet/NewWallet';
 import RestoreFromMnemonic from '@onekeyhq/kit/src/views/CreateWallet/AppWallet/RestoreFromMnemonic';
 import RestoreWallet from '@onekeyhq/kit/src/views/CreateWallet/AppWallet/RestoreWallet';
 import Guide from '@onekeyhq/kit/src/views/CreateWallet/Guide';
@@ -24,9 +27,14 @@ import SetupHardware from '@onekeyhq/kit/src/views/CreateWallet/HardwareWallet/S
 import SetupNewDevice from '@onekeyhq/kit/src/views/CreateWallet/HardwareWallet/SetupNewDevice';
 import SetupSuccess from '@onekeyhq/kit/src/views/CreateWallet/HardwareWallet/SetupSuccess';
 import OnekeyLiteBackup from '@onekeyhq/kit/src/views/Hardware/OnekeyLite/Backup';
-import OnekeyLitePinCode from '@onekeyhq/kit/src/views/Hardware/OnekeyLite/PinCode';
+import OnekeyLiteBackupPinCode from '@onekeyhq/kit/src/views/Hardware/OnekeyLite/PinCode/BackupPinCodeVerify';
+import OnekeyLiteRestorePinCode from '@onekeyhq/kit/src/views/Hardware/OnekeyLite/PinCode/RestorePinCodeVerify';
 import OnekeyLiteRestore from '@onekeyhq/kit/src/views/Hardware/OnekeyLite/Restore';
 import OnekeyLiteRestoreDoneView from '@onekeyhq/kit/src/views/Hardware/OnekeyLite/Restore/Done';
+import type {
+  OnekeyLiteModalRoutes,
+  OnekeyLiteRoutesParams,
+} from '@onekeyhq/kit/src/views/Hardware/OnekeyLite/routes';
 
 import createStackNavigator from './createStackNavigator';
 
@@ -48,9 +56,10 @@ export enum CreateWalletModalRoutes {
   CreateImportedAccount = 'CreateImportedAccount',
 
   // Onekey Lite backup
-  OnekeyLitePinCodeVerifyModal = 'OnekeyLitePinCodeVerifyModal',
+  OnekeyLiteRestorePinCodeVerifyModal = 'OnekeyLiteRestorePinCodeVerifyModal',
   OnekeyLiteRestoreModal = 'OnekeyLiteRestoreModal',
   OnekeyLiteRestoreDoneModal = 'OnekeyLiteRestoreDoneModal',
+  OnekeyLiteBackupPinCodeVerifyModal = 'OnekeyLiteBackupPinCodeVerifyModal',
   OnekeyLiteBackupModal = 'OnekeyLiteBackupModal',
 
   AddExistingWalletModal = 'AddExistingWalletModal',
@@ -58,12 +67,25 @@ export enum CreateWalletModalRoutes {
   AddImportedAccountModal = 'AddImportedAccountModal',
   AddImportedAccountDoneModal = 'AddImportedAccountDoneModal',
   AddWatchAccountModal = 'AddWatchAccount',
+  AttentionsModal = 'AttentionsModal',
+  MnemonicModal = 'MnemonicModal',
+  NewWalletModal = 'NewWalletModal',
 }
 
 export type CreateWalletRoutesParams = {
   [CreateWalletModalRoutes.CreateWalletModal]: undefined;
   [CreateWalletModalRoutes.ConnectHardwareModal]: undefined;
   [CreateWalletModalRoutes.AppWalletModal]: undefined;
+  [CreateWalletModalRoutes.AttentionsModal]: {
+    password: string;
+    withEnableAuthentication?: boolean;
+  };
+  [CreateWalletModalRoutes.MnemonicModal]: {
+    password: string;
+    withEnableAuthentication?: boolean;
+    mnemonic: string;
+  };
+  [CreateWalletModalRoutes.NewWalletModal]: undefined;
   [CreateWalletModalRoutes.AppWalletDoneModal]:
     | { mnemonic?: string }
     | undefined;
@@ -82,6 +104,7 @@ export type CreateWalletRoutesParams = {
   [CreateWalletModalRoutes.CreateWatchedAccount]: undefined;
   [CreateWalletModalRoutes.AddExistingWalletModal]: {
     mode: 'all' | 'mnemonic' | 'address' | 'privatekey';
+    presetText?: string;
   };
   [CreateWalletModalRoutes.AddImportedAccountModal]: {
     privatekey: string;
@@ -98,25 +121,12 @@ export type CreateWalletRoutesParams = {
   };
   [CreateWalletModalRoutes.GuideModal]: undefined;
 
-  // Onekey Lite backup
-  [CreateWalletModalRoutes.OnekeyLitePinCodeVerifyModal]: {
-    callBack: (pwd: string) => boolean;
-  };
-  [CreateWalletModalRoutes.OnekeyLiteRestoreModal]: {
-    pwd: string;
-    onRetry: () => void;
-  };
-  [CreateWalletModalRoutes.OnekeyLiteRestoreDoneModal]: {
-    onSuccess: (password: string) => void;
-    onCancel: () => void;
-  };
-  [CreateWalletModalRoutes.OnekeyLiteBackupModal]: {
-    walletId: string | null;
-    pwd: string;
-    backupData: string;
-    onRetry: () => void;
-    onSuccess: () => void;
-  };
+  // Onekey Lite Backup & Restore
+  [CreateWalletModalRoutes.OnekeyLiteRestorePinCodeVerifyModal]: OnekeyLiteRoutesParams[OnekeyLiteModalRoutes.OnekeyLiteRestorePinCodeVerifyModal];
+  [CreateWalletModalRoutes.OnekeyLiteRestoreModal]: OnekeyLiteRoutesParams[OnekeyLiteModalRoutes.OnekeyLiteRestoreModal];
+  [CreateWalletModalRoutes.OnekeyLiteRestoreDoneModal]: OnekeyLiteRoutesParams[OnekeyLiteModalRoutes.OnekeyLiteRestoreDoneModal];
+  [CreateWalletModalRoutes.OnekeyLiteBackupPinCodeVerifyModal]: OnekeyLiteRoutesParams[OnekeyLiteModalRoutes.OnekeyLiteBackupPinCodeVerifyModal];
+  [CreateWalletModalRoutes.OnekeyLiteBackupModal]: OnekeyLiteRoutesParams[OnekeyLiteModalRoutes.OnekeyLiteBackupModal];
 };
 
 const CreateWalletNavigator = createStackNavigator<CreateWalletRoutesParams>();
@@ -185,8 +195,8 @@ const modalRoutes = [
 
   // Onekey Lite backup
   {
-    name: CreateWalletModalRoutes.OnekeyLitePinCodeVerifyModal,
-    component: OnekeyLitePinCode,
+    name: CreateWalletModalRoutes.OnekeyLiteRestorePinCodeVerifyModal,
+    component: OnekeyLiteRestorePinCode,
   },
   {
     name: CreateWalletModalRoutes.OnekeyLiteRestoreModal,
@@ -195,6 +205,10 @@ const modalRoutes = [
   {
     name: CreateWalletModalRoutes.OnekeyLiteRestoreDoneModal,
     component: OnekeyLiteRestoreDoneView,
+  },
+  {
+    name: CreateWalletModalRoutes.OnekeyLiteBackupPinCodeVerifyModal,
+    component: OnekeyLiteBackupPinCode,
   },
   {
     name: CreateWalletModalRoutes.OnekeyLiteBackupModal,
@@ -219,6 +233,18 @@ const modalRoutes = [
   {
     name: CreateWalletModalRoutes.AddWatchAccountModal,
     component: AddWatchAccount,
+  },
+  {
+    name: CreateWalletModalRoutes.AttentionsModal,
+    component: AttentionsView,
+  },
+  {
+    name: CreateWalletModalRoutes.MnemonicModal,
+    component: Mnemonic,
+  },
+  {
+    name: CreateWalletModalRoutes.NewWalletModal,
+    component: NewWallet,
   },
 ];
 

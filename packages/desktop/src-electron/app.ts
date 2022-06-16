@@ -1,53 +1,46 @@
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+import os from 'os';
 import * as path from 'path';
 import { format as formatUrl } from 'url';
 
-import { BrowserWindow, app, ipcMain, screen, shell } from 'electron';
+import {
+  BrowserWindow,
+  app,
+  ipcMain,
+  screen,
+  session,
+  shell,
+  systemPreferences,
+} from 'electron';
 import isDev from 'electron-is-dev';
 
-import Logger, {
-  LogLevel,
-  defaultOptions as loggerDefaults,
-} from './libs/logger';
-import modules from './libs/modules';
-import * as store from './libs/store';
+import { PrefType } from './preload';
 
 const APP_NAME = 'OneKey Wallet';
 let mainWindow: BrowserWindow | null;
 
-// Logger
-const log = {
-  level:
-    app.commandLine.getSwitchValue('log-level') || (isDev ? 'debug' : 'error'),
-  writeToConsole: !app.commandLine.hasSwitch('log-no-print'),
-  writeToDisk: app.commandLine.hasSwitch('log-write'),
-  outputFile:
-    app.commandLine.getSwitchValue('log-file') || loggerDefaults.outputFile,
-  outputPath:
-    app.commandLine.getSwitchValue('log-path') || loggerDefaults.outputPath,
-};
-
-const logger = new Logger(log.level as LogLevel, { ...log });
-
-global.logger = logger;
-global.resourcesPath = process.resourcesPath;
+(global as any).resourcesPath = process.resourcesPath;
 const staticPath = isDev
   ? path.join(__dirname, '../public/static')
-  : path.join(global.resourcesPath, 'static');
+  : path.join((global as any).resourcesPath, 'static');
 // static path
 const preloadJsUrl = path.join(staticPath, 'preload.js');
 
-async function createMainWindow() {
+function createMainWindow() {
   const display = screen.getPrimaryDisplay();
   const dimensions = display.workAreaSize;
   const ratio = 16 / 9;
   const browserWindow = new BrowserWindow({
     title: APP_NAME,
-    titleBarStyle: 'hidden',
+    titleBarStyle: process.platform === 'win32' ? 'default' : 'hidden',
+    autoHideMenuBar: true,
     frame: true,
     resizable: true,
+    x: isDev ? 0 : undefined,
+    y: isDev ? 0 : undefined,
     width: Math.min(1200, dimensions.width),
     height: Math.min(1200 / ratio, dimensions.height),
-    minWidth: isDev ? undefined : 800,
+    minWidth: isDev ? undefined : 1024, // OK-8215
     minHeight: isDev ? undefined : 800 / ratio,
     webPreferences: {
       webviewTag: true,
@@ -79,7 +72,7 @@ async function createMainWindow() {
 
   browserWindow.webContents.on('did-finish-load', () => {
     browserWindow.webContents.send('SET_ONEKEY_DESKTOP_GLOBALS', {
-      resourcesPath: global.resourcesPath,
+      resourcesPath: (global as any).resourcesPath,
       staticPath: `file://${staticPath}`,
       preloadJsUrl: `file://${preloadJsUrl}?timestamp=${Date.now()}`,
     });
@@ -106,47 +99,129 @@ async function createMainWindow() {
     app.exit(0);
   });
 
-  // Modules
-  await modules({
-    mainWindow: browserWindow,
-    src,
-    store,
+  ipcMain.on('app/openPrefs', (_event, prefType: PrefType) => {
+    const platform = os.type();
+    if (platform === 'Darwin') {
+      shell.openPath('/System/Library/PreferencePanes/Security.prefPane');
+    } else if (platform === 'Windows_NT') {
+      // ref https://docs.microsoft.com/en-us/windows/uwp/launch-resume/launch-settings-app
+      if (prefType === 'camera') {
+        shell.openExternal('ms-settings:privacy-webcam');
+      }
+      // BlueTooth is not supported on desktop currently
+    } else {
+      // Linux ??
+    }
   });
+
+  ipcMain.on('app/toggleMaximizeWindow', () => {
+    if (browserWindow.isMaximized()) {
+      // Restore the original window size
+      browserWindow.unmaximize();
+    } else {
+      // Maximized window
+      browserWindow.maximize();
+    }
+  });
+
+  ipcMain.on('app/canPromptTouchID', (event) => {
+    event.returnValue = systemPreferences.canPromptTouchID();
+  });
+
+  ipcMain.on('app/promptTouchID', async (event, msg: string) => {
+    try {
+      await systemPreferences.promptTouchID(msg);
+      event.reply('app/promptTouchID/res', true);
+    } catch {
+      event.reply('app/promptTouchID/res', false);
+    }
+  });
+
+  // reset appState to undefined  to avoid screen lock.
+  browserWindow.on('enter-full-screen', () => {
+    browserWindow.webContents.send('appState', undefined);
+  });
+
+  // reset appState to undefined  to avoid screen lock.
+  browserWindow.on('leave-full-screen', () => {
+    browserWindow.webContents.send('appState', undefined);
+  });
+
+  browserWindow.on('show', () => {
+    browserWindow.webContents.send('appState', 'active');
+  });
+
+  browserWindow.on('hide', () => {
+    browserWindow.webContents.send('appState', 'background');
+  });
+
+  const filter = {
+    urls: ['http://127.0.0.1:21320/*', 'http://localhost:21320/*'],
+  };
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    filter,
+    (details, callback) => {
+      // @ts-ignore electron declares requestHeaders as an empty interface
+      details.requestHeaders.Origin = 'https://connect.onekey.so';
+
+      callback({ cancel: false, requestHeaders: details.requestHeaders });
+    },
+  );
+
+  if (!isDev) {
+    const PROTOCOL = 'file';
+    session.defaultSession.protocol.interceptFileProtocol(
+      PROTOCOL,
+      (request, callback) => {
+        let url = request.url.substr(PROTOCOL.length + 1);
+        // move to parent folder
+        url = path.join(__dirname, '..', 'build', url);
+        callback(url);
+      },
+    );
+
+    browserWindow.webContents.on('did-fail-load', () => {
+      browserWindow.loadURL(src);
+    });
+  }
 
   return browserWindow;
 }
 
-// https://www.electronjs.org/docs/all#apprequestsingleinstancelock
 const singleInstance = app.requestSingleInstanceLock();
 
 if (!singleInstance && !process.mas) {
-  logger.warn('main', 'Second instance detected, quitting...');
   app.quit();
 } else {
-  logger.info('main', 'Application starting');
-
   app.on('second-instance', () => {
-    // Someone tried to run a second instance, we should focus our window.
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
   });
 
-  app.name = APP_NAME; // overrides @onekey/desktop app name in menu
-  app.on('ready', async () => {
-    mainWindow = await createMainWindow();
+  app.name = APP_NAME;
+  app.on('ready', () => {
+    mainWindow = createMainWindow();
   });
 }
 
-app.on('activate', async () => {
+app.on('activate', () => {
   if (mainWindow === null) {
-    mainWindow = await createMainWindow();
+    mainWindow = createMainWindow();
   }
 });
 
 app.on('before-quit', () => {
   if (!mainWindow) return;
   mainWindow.removeAllListeners();
-  logger.exit();
 });
+
+// Closing the cause context: https://onekeyhq.atlassian.net/browse/OK-8096
+app.commandLine.appendSwitch('disable-features', 'CrossOriginOpenerPolicy');
+
+if (isDev) {
+  app.commandLine.appendSwitch('ignore-certificate-errors');
+  app.commandLine.appendSwitch('allow-insecure-localhost', 'true');
+  app.commandLine.appendSwitch('disable-site-isolation-trials');
+}

@@ -7,6 +7,14 @@ cp ./node_modules/@onekeyfe/cross-inpage-provider-injected/dist/injected/injecte
 
 # copy to Extension injected.js
 cp ./node_modules/@onekeyfe/cross-inpage-provider-injected/dist/injected/injectedExtension.js   ./packages/ext/src/entry/injected.js
+cp ./packages/ext/src/entry/injected.js ./packages/ext/src/entry/injected.text-js
 
 # copy to Native injectedCode
 cp ./node_modules/@onekeyfe/cross-inpage-provider-injected/dist/injected/injectedNative.js   ./packages/kit/src/components/WebView/injectedNative.text-js
+
+# copy index html
+cp ./packages/shared/src/web/index.html.ejs ./packages/shared/src/web/index.html
+
+# copy hardware js-sdk lib files to desktop
+mkdir -p ./packages/desktop/public/static/js-sdk/
+rsync ./node_modules/@onekeyfe/js-sdk/dist/js-sdk-desktop/ ./packages/desktop/public/static/js-sdk/ --checksum  --recursive --verbose

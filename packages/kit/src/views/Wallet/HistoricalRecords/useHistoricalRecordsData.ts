@@ -1,164 +1,184 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { useIntl } from 'react-intl';
-import useSWRInfinite from 'swr/infinite';
 
 import { Account } from '@onekeyhq/engine/src/types/account';
-import { Transaction, TxStatus } from '@onekeyhq/engine/src/types/covalent';
+import { TxStatus } from '@onekeyhq/engine/src/types/covalent';
 import { Network } from '@onekeyhq/engine/src/types/network';
+import { EVMDecodedItem } from '@onekeyhq/engine/src/vaults/impl/evm/decoder/types';
 
 import backgroundApiProxy from '../../../background/instance/backgroundApiProxy';
 import useFormatDate from '../../../hooks/useFormatDate';
 
-export type TransactionGroup = { title: string; data: Transaction[] };
+export type TransactionGroup = { title: string; data: EVMDecodedItem[] };
 
 type UseCollectiblesDataArgs = {
   account?: Account | null | undefined;
   network?: Network | null | undefined;
   tokenId?: string | null | undefined;
+  historyFilter?: (item: any) => boolean;
 };
 
-type UseHistoricalRecordsDataReturn = {
-  isLoading: boolean;
-  transactionRecords: TransactionGroup[];
-  fetchData: () => void;
-  loadMore?: () => void;
-  refresh?: () => void;
-};
-
-const PAGE_SIZE = 10;
-const FIRST_PAGE_SIZE = 20;
+const PAGE_SIZE = 50;
 
 const toTransactionSection = (
   queueStr: string,
-  _data: Transaction[] | null | undefined,
-  formatDate: (date: string) => string,
+  _data: EVMDecodedItem[] | null | undefined,
+  formatDate: (date: number) => string,
 ): TransactionGroup[] => {
   if (!_data) return [];
 
-  const sortData = _data.sort(
-    (a, b) =>
-      new Date(b.blockSignedAt).getTime() - new Date(a.blockSignedAt).getTime(),
-  );
+  const sortData = _data.sort((a, b) => b.blockSignedAt - a.blockSignedAt);
 
-  return sortData.reduce((_pre: TransactionGroup[], _current: Transaction) => {
+  const groups = sortData.reduce((acc: TransactionGroup[], cur) => {
     let key = queueStr;
-    if (_current.successful === TxStatus.Pending) {
-      key = queueStr;
-    } else {
-      key = formatDate(_current.blockSignedAt);
+    if (cur.txStatus !== TxStatus.Pending) {
+      key = formatDate(cur.blockSignedAt);
     }
 
-    let dateGroup = _pre.find((x) => x.title === key);
+    let dateGroup = acc.find((x) => x.title === key);
     if (!dateGroup) {
       dateGroup = { title: key, data: [] };
-      _pre.push(dateGroup);
+      acc.push(dateGroup);
     }
-    dateGroup.data.push(_current);
-    return _pre;
+    dateGroup.data.push(cur);
+    return acc;
   }, []);
+
+  // bring pending txs to the top.
+  const sortedGroups = groups.sort((a) => (a.title === queueStr ? -1 : 1));
+
+  return sortedGroups;
 };
+
+const filtePendingList = (list: EVMDecodedItem[]) => {
+  const pending = list.filter(
+    (h) => h.txStatus === TxStatus.Pending && !!h.nonce,
+  );
+
+  const nonceMap = pending.reduce<Map<number, EVMDecodedItem[]>>((acc, cur) => {
+    const { nonce } = cur;
+
+    if (typeof nonce === 'undefined') {
+      return acc;
+    }
+
+    const origin = acc.get(nonce);
+    if (origin) {
+      acc.set(nonce, [...origin, cur]);
+    } else {
+      acc.set(nonce, [cur]);
+    }
+    return acc;
+  }, new Map<number, EVMDecodedItem[]>());
+
+  const dropList: string[] = [];
+  nonceMap.forEach((i) => {
+    const sameNonceList = i.sort((a, b) => a.blockSignedAt - b.blockSignedAt);
+    sameNonceList.pop(); // pop most recent one.
+    dropList.push(...sameNonceList.map((x) => x.txHash));
+  });
+
+  return list.filter((h) => !dropList.includes(h.txHash));
+};
+
+type RequestParamsType = {
+  accountId: string;
+  networkId: string;
+  tokenId: string | undefined | null;
+  historyFilter?: (item: any) => boolean;
+  pageNumber: number;
+  pageSize: number;
+} | null;
 
 export const useHistoricalRecordsData = ({
   account,
   network,
   tokenId,
-}: UseCollectiblesDataArgs): UseHistoricalRecordsDataReturn => {
+  historyFilter,
+}: UseCollectiblesDataArgs) => {
   const intl = useIntl();
   const formatDate = useFormatDate();
 
-  const hasNoParams = !account || !network;
+  const [transactionRecords, setTransactionRecords] = useState<
+    TransactionGroup[]
+  >([]);
 
-  const getKey = (size: number, previousPageData: Transaction[]) => {
-    // reached the end
-    const isEndOfData = previousPageData && !previousPageData?.length;
+  const [isLoading, setIsLoading] = useState(false);
 
-    if (isEndOfData || hasNoParams) return null;
+  const hasNoParams = useMemo(() => !account || !network, [account, network]);
+
+  const paramsMemo: RequestParamsType = useMemo(() => {
+    if (hasNoParams) return null;
+
+    const pageSize = PAGE_SIZE;
 
     const params = {
-      accountId: account.id,
-      networkId: network.id,
+      accountId: account?.id ?? '',
+      networkId: network?.id ?? '',
       tokenId,
-      // offset limit 写法
-      // offset:
-      //   size > 0 ? FIRST_PAGE_SIZE + (size - 1) * PAGE_SIZE : FIRST_PAGE_SIZE,
-      // limit: size === 0 ? FIRST_PAGE_SIZE : PAGE_SIZE,
-      pageNumber: size > 0 ? size + 1 : 0,
-      pageSize: size === 0 ? FIRST_PAGE_SIZE : PAGE_SIZE,
+      historyFilter,
+      pageNumber: 0,
+      pageSize,
     };
+
     return params;
-  };
+  }, [account?.id, hasNoParams, historyFilter, network?.id, tokenId]);
 
-  const assetsSwr = useSWRInfinite(getKey, async (params) => {
-    let history;
-    if (params.tokenId) {
-      history = await backgroundApiProxy.engine.getErc20TxHistories(
-        params.networkId,
-        params.accountId,
-        params.tokenId,
-        params.pageNumber,
-        params.pageSize,
-      );
-    } else {
-      history = await backgroundApiProxy.engine.getTxHistories(
-        params.networkId,
-        params.accountId,
-        params.pageNumber,
-        params.pageSize,
-      );
+  const requestCall = useCallback(async (params: RequestParamsType) => {
+    if (!params) {
+      return [];
     }
 
-    if (history?.error || !history?.data?.txList) {
-      throw new Error(history?.errorMessage ?? '');
-    }
-
-    return history.data.txList;
-  });
-
-  return useMemo(() => {
-    const { data, error, mutate, isValidating } = assetsSwr;
-
-    if (hasNoParams) {
-      return {
-        isLoading: true,
-        fetchData: mutate,
-        transactionRecords: [],
-      };
-    }
-
-    if (error) {
-      return {
-        isLoading: false,
-        fetchData: mutate,
-        transactionRecords: [],
-      };
-    }
-
-    // const isRefreshing = isValidating && !!data;
-
-    const assets = data?.flat(1) ?? [];
-
-    const transactionRecords = toTransactionSection(
-      intl.formatMessage({ id: 'history__queue' }),
-      assets,
-      (date: string) => formatDate.formatMonth(date, { hideTheYear: true }),
+    const history = await backgroundApiProxy.engine.getTxHistories(
+      params.networkId,
+      params.accountId,
+      {
+        contract: params.tokenId,
+        isHidePending: !!params.tokenId,
+      },
     );
 
-    const loadMore = () => {
-      const isEmpty = !data?.length;
-      const isReachingEnd =
-        isEmpty || (data && data[data.length - 1].length < PAGE_SIZE);
+    let filted = filtePendingList(history);
 
-      if (!isValidating && !isReachingEnd) {
-        assetsSwr.setSize((preSize) => preSize + 1);
+    const itemFilter = params.historyFilter;
+    if (itemFilter) {
+      filted = filted.filter((h) => itemFilter(h));
+    }
+
+    return filted;
+  }, []);
+
+  const refresh = useCallback(() => {
+    (async () => {
+      setIsLoading(true);
+      setTransactionRecords([]);
+
+      if (hasNoParams) {
+        setIsLoading(false);
+        return;
       }
-    };
 
-    return {
-      loadMore,
+      const assets = await requestCall(paramsMemo);
+
+      const transactions = toTransactionSection(
+        intl.formatMessage({ id: 'history__queue' }),
+        assets,
+        (date: number) =>
+          formatDate.formatMonth(new Date(date), { hideTheYear: true }),
+      );
+
+      setIsLoading(false);
+      setTransactionRecords(transactions);
+    })();
+  }, [formatDate, hasNoParams, intl, paramsMemo, requestCall]);
+
+  return useMemo(
+    () => ({
+      isLoading,
       transactionRecords,
-      fetchData: mutate,
-      isLoading: isValidating,
-    };
-  }, [assetsSwr, formatDate, hasNoParams, intl]);
+      refresh,
+    }),
+    [isLoading, refresh, transactionRecords],
+  );
 };

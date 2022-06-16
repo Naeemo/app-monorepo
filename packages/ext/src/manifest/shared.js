@@ -1,7 +1,10 @@
+// https://developer.chrome.com/docs/extensions/mv3/manifest/key/
+const extensionIdKey = '';
 module.exports = {
-  'manifest_version': 3,
+  // generate extensionId in local
+  // 'key': process.env.NODE_ENV !== 'production' ? extensionIdKey : undefined,
   'version': process.env.VERSION,
-  'name': 'OneKey: Safe Crypto DeFi Wallet',
+  'name': 'OneKey',
   'description':
     'Multi-Chain Support for BTC, ETH, BNB, NEAR & other Layer2 Networks',
   /*

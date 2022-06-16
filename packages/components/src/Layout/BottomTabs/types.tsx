@@ -1,5 +1,6 @@
 import type * as React from 'react';
 
+import type BottomSheet from '@gorhom/bottom-sheet';
 import type { HeaderOptions } from '@react-navigation/elements';
 import type {
   Descriptor,
@@ -19,6 +20,27 @@ import type {
   ViewStyle,
 } from 'react-native';
 import type { EdgeInsets } from 'react-native-safe-area-context';
+
+export type TBottomBarFoldableItem<T = any> = {
+  name: T;
+  foldable: boolean;
+  component: () => null;
+  onPress: () => void;
+  tabBarLabel: string;
+  description: string;
+  tabBarIcon: () => string;
+};
+
+export type TBottomBarRefAttr = BottomSheet;
+
+export type TBottomBarModalProps = {
+  onOpen: () => void;
+  onClose: () => void;
+  handleClose: () => void;
+  handleOpen: () => void;
+  foldableList: TBottomBarFoldableItem[];
+  tabBarHeight: number;
+};
 
 export type Layout = { width: number; height: number };
 
@@ -303,6 +325,7 @@ export type BottomTabBarProps = {
   descriptors: BottomTabDescriptorMap;
   navigation: NavigationHelpers<ParamListBase, BottomTabNavigationEventMap>;
   insets: EdgeInsets;
+  foldableList: TBottomBarFoldableItem[];
 };
 
 export type BottomTabBarButtonProps = Omit<

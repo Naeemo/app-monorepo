@@ -1,7 +1,6 @@
 import React, { FC, useEffect, useState } from 'react';
 
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/core';
-import { DrawerActions, TabActions } from '@react-navigation/native';
 import { useIntl } from 'react-intl';
 import { Platform } from 'react-native';
 
@@ -14,24 +13,18 @@ import {
   CardInfo,
 } from '@onekeyhq/app/src/hardware/OnekeyLite/types';
 import { ButtonType } from '@onekeyhq/components/src/Button';
-import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
-import { useToast } from '@onekeyhq/kit/src/hooks/useToast';
 import {
   CreateWalletModalRoutes,
   CreateWalletRoutesParams,
 } from '@onekeyhq/kit/src/routes';
-import {
-  ModalScreenProps,
-  TabRoutes,
-  TabRoutesParams,
-} from '@onekeyhq/kit/src/routes/types';
+import { ModalScreenProps } from '@onekeyhq/kit/src/routes/types';
 
+import { SkipAppLock } from '../../../../components/AppLock';
+import { useNavigationActions } from '../../../../hooks';
 import HardwareConnect, { OperateType } from '../../BaseConnect';
 import ErrorDialog from '../ErrorDialog';
 
 type NavigationProps = ModalScreenProps<CreateWalletRoutesParams>;
-
-type TabNavigationProps = ModalScreenProps<TabRoutesParams>;
 
 type RouteProps = RouteProp<
   CreateWalletRoutesParams,
@@ -40,16 +33,16 @@ type RouteProps = RouteProp<
 
 const Restore: FC = () => {
   const intl = useIntl();
+  const { openRootHome, openDrawer } = useNavigationActions();
   const navigation = useNavigation<NavigationProps['navigation']>();
-  const tabNavigation = useNavigation<TabNavigationProps['navigation']>();
-  const { serviceAccount } = backgroundApiProxy;
-  const toast = useToast();
 
-  const { pwd, onRetry } = useRoute<RouteProps>().params;
+  const { pinCode } = useRoute<RouteProps>().params;
   const [pinRetryCount, setPinRetryCount] = useState<string>('');
   const [restoreData, setRestoreData] = useState<string>();
 
-  const [title] = useState('Onekey Lite');
+  const [title] = useState(
+    intl.formatMessage({ id: 'app__hardware_name_onekey_lite' }),
+  );
   const [actionPressStyle, setActionPressStyle] =
     useState<ButtonType>('primary');
   const [actionPressContent, setActionPressContent] = useState(
@@ -64,10 +57,14 @@ const Restore: FC = () => {
   const [operateType, setOperateType] = useState<OperateType>('guide');
   const [errorCode, setErrorCode] = useState(0);
 
+  const goBack = () => {
+    const inst = navigation.getParent() || navigation;
+    inst.goBack();
+  };
+
   const goBackHome = () => {
-    tabNavigation.navigate(TabRoutes.Home);
-    tabNavigation.dispatch(TabActions.jumpTo(TabRoutes.Home, {}));
-    tabNavigation.dispatch(DrawerActions.openDrawer());
+    openRootHome();
+    openDrawer();
   };
 
   const stateNfcSearch = () => {
@@ -101,7 +98,8 @@ const Restore: FC = () => {
   };
 
   const stateNfcDone = () => {
-    setActionPressStyle('primary');
+    ('primary');
+
     setActionPressContent(intl.formatMessage({ id: 'action__go_to_view' }));
     setActionState(intl.formatMessage({ id: 'title__recovery_completed' }));
     setActionDescription(
@@ -116,7 +114,7 @@ const Restore: FC = () => {
     stateNfcSearch();
     OnekeyLite.cancel();
     OnekeyLite.getMnemonicWithPin(
-      pwd,
+      pinCode,
       (error: CallbackError, data: string | null, state: CardInfo) => {
         console.log('state', state);
         if (data) {
@@ -125,23 +123,9 @@ const Restore: FC = () => {
           navigation.navigate(
             CreateWalletModalRoutes.OnekeyLiteRestoreDoneModal,
             {
-              onSuccess: async (password) => {
-                try {
-                  await serviceAccount.createHDWallet({
-                    password,
-                    mnemonic: data.trim(),
-                  });
-
-                  stateNfcDone();
-                } catch (e) {
-                  toast.show({
-                    title: intl.formatMessage({ id: 'msg__unknown_error' }),
-                  });
-                  navigation.goBack();
-                }
-              },
-              onCancel: () => {
-                navigation.goBack();
+              mnemonic: data,
+              onSuccess: () => {
+                stateNfcDone();
               },
             },
           );
@@ -171,7 +155,7 @@ const Restore: FC = () => {
       case 'transfer':
         if (Platform.OS === 'ios') return;
         OnekeyLite.cancel();
-        navigation.goBack();
+        goBack();
         break;
 
       case 'complete':
@@ -179,23 +163,9 @@ const Restore: FC = () => {
         navigation.navigate(
           CreateWalletModalRoutes.OnekeyLiteRestoreDoneModal,
           {
-            onSuccess: async (password) => {
-              try {
-                await serviceAccount.createHDWallet({
-                  password,
-                  mnemonic: restoreData.trim(),
-                });
-
-                stateNfcDone();
-              } catch (e) {
-                toast.show({
-                  title: intl.formatMessage({ id: 'msg__unknown_error' }),
-                });
-                navigation.goBack();
-              }
-            },
-            onCancel: () => {
-              navigation.goBack();
+            mnemonic: restoreData,
+            onSuccess: () => {
+              stateNfcDone();
             },
           },
         );
@@ -206,7 +176,7 @@ const Restore: FC = () => {
         break;
 
       default:
-        navigation.goBack();
+        goBack();
         break;
     }
   };
@@ -243,6 +213,7 @@ const Restore: FC = () => {
 
   return (
     <>
+      <SkipAppLock />
       <HardwareConnect
         title={title}
         connectType="ble"
@@ -258,14 +229,18 @@ const Restore: FC = () => {
         code={errorCode}
         pinRetryCount={pinRetryCount}
         onRetryConnect={() => startNfcScan()}
-        onRetry={() => onRetry?.()}
+        onRetry={() =>
+          navigation.replace(
+            CreateWalletModalRoutes.OnekeyLiteRestorePinCodeVerifyModal,
+          )
+        }
         onExit={() => {
-          navigation.goBack();
+          goBack();
         }}
         onDialogClose={() => setErrorCode(0)}
         onIntoNfcSetting={() => {
           OnekeyLite.intoSetting();
-          navigation.goBack();
+          goBack();
         }}
       />
     </>

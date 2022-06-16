@@ -3,6 +3,8 @@ import { isNil, isString } from 'lodash';
 
 import { VaultHelperBase } from '../../VaultHelperBase';
 
+import { ethersTxToJson, jsonToEthersTx } from './decoder/util';
+
 import type { IEncodedTxEvm } from './Vault';
 
 /*
@@ -35,13 +37,19 @@ function toBigNumberField(
 export default class VaultHelper extends VaultHelperBase {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   parseToNativeTx(
-    encodedTx: IEncodedTxEvm | string,
+    encodedTx: IEncodedTxEvm,
   ): Promise<ethers.Transaction | null> {
     // TODO try catch
     let ethersTx: ethers.Transaction | null = null;
     // parse rawTx string
+    // console.log('parseToNativeTx ', encodedTx);
     if (isString(encodedTx)) {
-      ethersTx = ethers.utils.parseTransaction(encodedTx as any);
+      ethersTx = ethers.utils.parseTransaction(encodedTx);
+      ethersTx = {
+        ...ethersTx,
+        from: ethersTx.from?.toLocaleLowerCase(),
+        to: ethersTx.to?.toLocaleLowerCase(),
+      };
     } else {
       // @ts-ignore
       ethersTx = {
@@ -57,5 +65,36 @@ export default class VaultHelper extends VaultHelperBase {
     }
 
     return Promise.resolve(ethersTx);
+  }
+
+  override async parseToEncodedTx(
+    rawTxOrEncodedTx: IEncodedTxEvm,
+  ): Promise<IEncodedTxEvm | null> {
+    if (!rawTxOrEncodedTx) {
+      return null;
+    }
+    const nativeTx = await this.parseToNativeTx(rawTxOrEncodedTx);
+    if (!nativeTx) {
+      return null;
+    }
+
+    return {
+      ...nativeTx,
+      from: nativeTx.from ?? '',
+      to: nativeTx.to ?? '',
+      value: nativeTx.value.toString(),
+      gasLimit: nativeTx.gasLimit?.toString(),
+      gasPrice: nativeTx.gasPrice?.toString(),
+      maxFeePerGas: nativeTx.maxFeePerGas?.toString(),
+      maxPriorityFeePerGas: nativeTx.maxPriorityFeePerGas?.toString(),
+    };
+  }
+
+  override nativeTxToJson(nativeTx: ethers.Transaction): Promise<string> {
+    return ethersTxToJson(nativeTx);
+  }
+
+  override jsonToNativeTx(json: string): Promise<ethers.Transaction> {
+    return jsonToEthersTx(json);
   }
 }

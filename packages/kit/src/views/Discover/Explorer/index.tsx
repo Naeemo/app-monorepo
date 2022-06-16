@@ -1,24 +1,31 @@
 import React, { FC, useEffect, useMemo, useState } from 'react';
 
 import { IWebViewWrapperRef } from '@onekeyfe/onekey-cross-webview';
+import { RouteProp, useRoute } from '@react-navigation/core';
 import { useIntl } from 'react-intl';
 import { Platform, Share } from 'react-native';
+import { useDeepCompareMemo } from 'use-deep-compare';
 
-import { Box, useIsSmallLayout } from '@onekeyhq/components';
+import {
+  Box,
+  DialogManager,
+  useIsVerticalLayout,
+  useToast,
+} from '@onekeyhq/components';
 import { copyToClipboard } from '@onekeyhq/components/src/utils/ClipboardUtils';
 import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
 import WebView from '@onekeyhq/kit/src/components/WebView';
-import { useToast } from '@onekeyhq/kit/src/hooks';
 import { useAppSelector } from '@onekeyhq/kit/src/hooks/redux';
-import useOpenBrowser from '@onekeyhq/kit/src/hooks/useOpenBrowser';
 import {
   addWebSiteHistory,
   updateFirstRemindDAPP,
   updateHistory,
   updateWebSiteHistory,
 } from '@onekeyhq/kit/src/store/reducers/discover';
+import { openUrl, openUrlExternal } from '@onekeyhq/kit/src/utils/openUrl';
 import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
+import { TabRoutes, TabRoutesParams } from '../../../routes/types';
 import Home from '../Home';
 
 import Desktop from './Content/Desktop';
@@ -36,15 +43,24 @@ type WebSiteType = {
   historyId?: string;
 };
 
+export type SearchContentType = {
+  searchContent: string;
+  dapp?: MatchDAppItemType; // don`t search dapp
+};
+
 export type ExplorerViewProps = {
   displayInitialPage?: boolean;
-  searchContent?: string;
-  onSearchContentChange?: (text: string) => void;
+  searchContent?: SearchContentType;
+  loading?: boolean;
+  onSearchContentChange?: (text: SearchContentType) => void;
   onSearchSubmitEditing?: (text: MatchDAppItemType | string) => void;
   explorerContent: React.ReactNode;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
   onGoBack?: () => void;
   onNext?: () => void;
   onRefresh?: () => void;
+  onStopLoading?: () => void;
   onMore?: () => void;
   moreView: React.ReactNode;
   showExplorerBar?: boolean;
@@ -52,11 +68,15 @@ export type ExplorerViewProps = {
 
 let dappOpenConfirm: ((confirm: boolean) => void) | undefined;
 
+// 空白页面 URL
+const BrowserPage = 'about:blank';
+
+type DiscoverRouteProp = RouteProp<TabRoutesParams, TabRoutes.Discover>;
 const Explorer: FC = () => {
   const intl = useIntl();
   const toast = useToast();
-  const openBrowser = useOpenBrowser();
-
+  const route = useRoute<DiscoverRouteProp>();
+  const { incomingUrl } = route.params || {};
   const { dispatch } = backgroundApiProxy;
   const discover = useAppSelector((s) => s.discover);
 
@@ -65,10 +85,16 @@ const Explorer: FC = () => {
   >(null);
   const [webviewRef, setWebviewRef] = useState<IWebViewWrapperRef | null>(null);
 
+  const [canGoBack, setCanGoBack] = useState<boolean>(false);
+  const [canGoForward, setCanGoForward] = useState<boolean>(false);
+
   const {
     canGoBack: webCanGoBack,
+    canGoForward: webCanGoForward,
     goBack,
     goForward,
+    stopLoading,
+    loading: webLoading,
     url: webUrl,
     title: webTitle,
     favicon: webFavicon,
@@ -77,16 +103,14 @@ const Explorer: FC = () => {
 
   const [displayInitialPage, setDisplayInitialPage] = useState(true);
 
-  const [searchContent, setSearchContent] = useState<string>();
+  const [searchContent, setSearchContent] = useState<SearchContentType>();
   const [currentWebSite, setCurrentWebSite] = useState<WebSiteType>();
 
   const [showExplorerBar, setShowExplorerBar] = useState<boolean>(false);
 
-  const [showDappOpenHint, setShowDappOpenHint] = useState<boolean>(false);
-
   const [refreshKey, setRefreshKey] = useState<string>();
 
-  const isSmallLayout = useIsSmallLayout();
+  const isVerticalLayout = useIsVerticalLayout();
 
   useEffect(() => {
     if (platformEnv.isNative || platformEnv.isDesktop) {
@@ -99,11 +123,11 @@ const Explorer: FC = () => {
   const gotoUrl = async (item: (string | MatchDAppItemType) | undefined) => {
     if (!platformEnv.isNative && !platformEnv.isDesktop) {
       if (typeof item === 'string') {
-        openBrowser.openUrl(item);
+        openUrl(item);
       } else if (item?.dapp) {
-        openBrowser.openUrl(item?.dapp?.url ?? '');
+        openUrl(item?.dapp?.url ?? '');
       } else if (item?.webSite) {
-        openBrowser.openUrl(item?.webSite?.url ?? '');
+        openUrl(item?.webSite?.url ?? '');
       }
       return false;
     }
@@ -116,15 +140,30 @@ const Explorer: FC = () => {
     // 打开的是一个链接
     if (typeof item === 'string') {
       setDisplayInitialPage(false);
-      if (item !== currentWebSite?.url) {
-        setCurrentWebSite({ url: item });
+
+      try {
+        let url = item;
+        if (!url.startsWith('http') && url.indexOf('.') !== -1 && url) {
+          url = `http://${url}`;
+        }
+        url = new URL(url).toString();
+
+        if (url) {
+          setCurrentWebSite({ url });
+
+          dispatch(
+            addWebSiteHistory({
+              keyUrl: undefined,
+              webSite: { url },
+            }),
+          );
+        }
+      } catch (error) {
+        setCurrentWebSite({ url: BrowserPage });
+        setSearchContent({ searchContent: item });
+        console.log('not a url', error);
       }
-      dispatch(
-        addWebSiteHistory({
-          keyUrl: undefined,
-          webSite: { url: item },
-        }),
-      );
+
       return true;
     }
 
@@ -150,7 +189,20 @@ const Explorer: FC = () => {
 
     // 打开的是 Dapp, 处理首次打开 Dapp 提示
     if (item?.dapp && discover.firstRemindDAPP) {
-      setShowDappOpenHint(true);
+      setTimeout(() => {
+        DialogManager.show({
+          render: (
+            <DappOpenHintDialog
+              onVisibilityChange={() => {
+                dappOpenConfirm = undefined;
+              }}
+              onConfirm={() => {
+                dappOpenConfirm?.(true);
+              }}
+            />
+          ),
+        });
+      }, 1);
 
       const isConfirm = await new Promise<boolean>((resolve) => {
         dappOpenConfirm = resolve;
@@ -191,6 +243,13 @@ const Explorer: FC = () => {
   };
 
   useEffect(() => {
+    if (incomingUrl) {
+      gotoUrl(incomingUrl);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingUrl]);
+
+  useEffect(() => {
     let content: string;
     if (displayInitialPage) {
       content = '';
@@ -200,8 +259,30 @@ const Explorer: FC = () => {
       content = currentWebSite?.url ?? '';
     }
 
-    setSearchContent(content);
-  }, [currentWebSite, webUrl, displayInitialPage]);
+    if (content !== BrowserPage) setSearchContent({ searchContent: content });
+
+    if (displayInitialPage === false || webCanGoBack()) {
+      setCanGoBack(true);
+    } else {
+      setCanGoBack(false);
+    }
+
+    if (displayInitialPage === true) {
+      if (webCanGoForward() || currentWebSite) {
+        setCanGoForward(true);
+      } else {
+        setCanGoForward(false);
+      }
+    } else {
+      setCanGoForward(false);
+    }
+  }, [
+    currentWebSite,
+    webUrl,
+    displayInitialPage,
+    webCanGoBack,
+    webCanGoForward,
+  ]);
 
   useEffect(() => {
     dispatch(
@@ -210,26 +291,15 @@ const Explorer: FC = () => {
         webSite: { url: webUrl, title: webTitle, favicon: webFavicon },
       }),
     );
-  }, [currentWebSite, dispatch, webTitle, webUrl, webFavicon]);
+    // currentWebSite 变动不更新 history
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatch, webTitle, webUrl, webFavicon]);
 
   const onSearchSubmitEditing = (dapp: MatchDAppItemType | string) => {
     if (typeof dapp === 'string') {
       console.log('onSearchSubmitEditing', dapp);
-      try {
-        let url = dapp;
-        if (!url.startsWith('http') && url.indexOf('.') !== -1 && url) {
-          url = `http://${url}`;
-        }
-        url = new URL(url).toString();
-
-        if (url) gotoUrl(url);
-      } catch (error) {
-        gotoUrl(`https://www.google.com/search?q=${dapp}`);
-        console.log('not a url', error);
-      }
-    } else if (dapp) {
-      gotoUrl(dapp);
     }
+    gotoUrl(dapp);
   };
 
   const onGoBack = () => {
@@ -262,8 +332,16 @@ const Explorer: FC = () => {
     console.log('onRefresh');
   };
 
+  const onStopLoading = () => {
+    stopLoading();
+  };
+
   const onMore = () => {
     setVisibleMore(!visibleMore);
+  };
+
+  const onGoHomePage = () => {
+    setDisplayInitialPage(true);
   };
 
   const getCurrentUrl = () => webUrl ?? currentWebSite?.url ?? '';
@@ -274,7 +352,7 @@ const Explorer: FC = () => {
   };
 
   const onOpenBrowser = () => {
-    openBrowser.openUrlExternal(getCurrentUrl());
+    openUrlExternal(getCurrentUrl());
   };
 
   const onShare = () => {
@@ -299,14 +377,21 @@ const Explorer: FC = () => {
     }
   };
 
+  const currentWebSiteMemo = useDeepCompareMemo(
+    () => currentWebSite,
+    [currentWebSite],
+  );
   const explorerContent = useMemo(
     () => (
       <Box flex={1}>
         {displayInitialPage ? (
-          <Home onItemSelect={(item) => gotoUrl({ id: item.id, dapp: item })} />
+          <Home
+            onItemSelect={(item) => gotoUrl({ id: item.id, dapp: item })}
+            onItemSelectHistory={(item) => gotoUrl(item)}
+          />
         ) : (
           <WebView
-            src={currentWebSite?.url ?? ''}
+            src={currentWebSiteMemo?.url ?? ''}
             onWebViewRef={(ref) => {
               setWebviewRef(ref);
             }}
@@ -317,7 +402,7 @@ const Explorer: FC = () => {
       </Box>
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentWebSite, displayInitialPage],
+    [currentWebSiteMemo, displayInitialPage],
   );
 
   const moreViewContent = useMemo(
@@ -329,6 +414,7 @@ const Explorer: FC = () => {
         onShare={onShare}
         onOpenBrowser={onOpenBrowser}
         onCopyUrlToClipboard={onCopyUrlToClipboard}
+        onGoHomePage={onGoHomePage}
       />
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -336,51 +422,43 @@ const Explorer: FC = () => {
   );
 
   return (
-    <>
-      <Box flex={1} bg="background-default">
-        {isSmallLayout ? (
-          <Mobile
-            key={refreshKey}
-            searchContent={searchContent}
-            onSearchContentChange={setSearchContent}
-            onSearchSubmitEditing={onSearchSubmitEditing}
-            explorerContent={explorerContent}
-            onGoBack={onGoBack}
-            onNext={onNext}
-            onRefresh={onRefresh}
-            onMore={onMore}
-            moreView={moreViewContent}
-            showExplorerBar={showExplorerBar}
-          />
-        ) : (
-          <Desktop
-            key={refreshKey}
-            displayInitialPage={displayInitialPage}
-            searchContent={searchContent}
-            onSearchContentChange={setSearchContent}
-            onSearchSubmitEditing={onSearchSubmitEditing}
-            explorerContent={explorerContent}
-            onGoBack={onGoBack}
-            onNext={onNext}
-            onRefresh={onRefresh}
-            onMore={onMore}
-            moreView={moreViewContent}
-            showExplorerBar={showExplorerBar}
-          />
-        )}
-      </Box>
-      <DappOpenHintDialog
-        visible={showDappOpenHint}
-        onVisibilityChange={() => {
-          setShowDappOpenHint(false);
-          dappOpenConfirm = undefined;
-        }}
-        onConfirm={() => {
-          setShowDappOpenHint(false);
-          dappOpenConfirm?.(true);
-        }}
-      />
-    </>
+    <Box flex={1} bg="background-default">
+      {isVerticalLayout ? (
+        <Mobile
+          key={refreshKey}
+          searchContent={searchContent}
+          onSearchContentChange={setSearchContent}
+          onSearchSubmitEditing={onSearchSubmitEditing}
+          explorerContent={explorerContent}
+          canGoBack={canGoBack}
+          onGoBack={onGoBack}
+          onNext={onNext}
+          onRefresh={onRefresh}
+          onMore={onMore}
+          moreView={moreViewContent}
+          showExplorerBar={showExplorerBar}
+        />
+      ) : (
+        <Desktop
+          key={refreshKey}
+          displayInitialPage={displayInitialPage}
+          searchContent={searchContent}
+          onSearchContentChange={setSearchContent}
+          onSearchSubmitEditing={onSearchSubmitEditing}
+          explorerContent={explorerContent}
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          loading={webLoading}
+          onGoBack={onGoBack}
+          onNext={onNext}
+          onRefresh={onRefresh}
+          onStopLoading={onStopLoading}
+          onMore={onMore}
+          moreView={moreViewContent}
+          showExplorerBar={showExplorerBar}
+        />
+      )}
+    </Box>
   );
 };
 

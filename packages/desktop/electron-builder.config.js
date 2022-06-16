@@ -7,7 +7,7 @@ module.exports = {
     'version': process.env.VERSION,
   },
   'appId': 'so.onekey.wallet.desktop',
-  'productName': 'OneKey Wallet',
+  'productName': 'OneKey',
   'copyright': 'Copyright © ${author}',
   'asar': true,
   'electronVersion': '15.3.1',
@@ -70,7 +70,10 @@ module.exports = {
     'gatekeeperAssess': false,
     'darkModeSupport': false,
     'category': 'productivity',
-    'target': [{ target: 'dmg', arch: ['x64', 'arm64'] }, { target: 'zip', arch: ['x64', 'arm64'] }],
+    'target': [
+      { target: 'dmg', arch: ['x64', 'arm64'] },
+      { target: 'zip', arch: ['x64', 'arm64'] },
+    ],
   },
   'win': {
     'extraResources': [

@@ -3,7 +3,13 @@ import React, { FC, useCallback, useEffect, useState } from 'react';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/core';
 import { useIntl } from 'react-intl';
 
-import { Box, Container, Modal, Typography } from '@onekeyhq/components';
+import {
+  Box,
+  Container,
+  Modal,
+  Typography,
+  useToast,
+} from '@onekeyhq/components';
 import { Account } from '@onekeyhq/engine/src/types/account';
 import { Wallet } from '@onekeyhq/engine/src/types/wallet';
 import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
@@ -12,6 +18,8 @@ import {
   ManagerAccountRoutesParams,
 } from '@onekeyhq/kit/src/routes/Modal/ManagerAccount';
 
+import { ValidationFields } from '../../../components/Protected';
+import { useActiveWalletAccount } from '../../../hooks/redux';
 import useLocalAuthenticationModal from '../../../hooks/useLocalAuthenticationModal';
 import { ModalRoutes, RootRoutes } from '../../../routes/types';
 import AccountModifyNameDialog from '../ModifyAccount';
@@ -33,6 +41,8 @@ const ManagerAccountModal: FC = () => {
   const [modifyNameAccount, setModifyNameAccount] = useState<Account>();
   const { walletId, accountId, networkId, refreshAccounts } =
     useRoute<RouteProps>().params;
+  const { network } = useActiveWalletAccount();
+  const toast = useToast();
 
   const [wallet, setWallet] = useState<Wallet>();
   const [account, setAccount] = useState<Account>();
@@ -62,6 +72,8 @@ const ManagerAccountModal: FC = () => {
     refreshAccount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const canExportPrivateKey = !!network?.settings?.privateKeyExportEnabled;
 
   return (
     <>
@@ -100,12 +112,20 @@ const ManagerAccountModal: FC = () => {
               <Container.Box mt={2}>
                 {(wallet?.type === 'hd' || wallet?.type === 'imported') && (
                   <Container.Item
-                    hasArrow
+                    hasArrow={canExportPrivateKey}
                     title={intl.formatMessage({
                       id: 'action__export_private_key',
                     })}
                     titleColor="text-default"
                     onPress={() => {
+                      if (!canExportPrivateKey) {
+                        toast.show({
+                          title: intl.formatMessage({
+                            id: 'badge__coming_soon',
+                          }),
+                        });
+                        return;
+                      }
                       showVerify(
                         (pwd) => {
                           navigation.navigate(RootRoutes.Modal, {
@@ -122,6 +142,8 @@ const ManagerAccountModal: FC = () => {
                           });
                         },
                         () => {},
+                        null,
+                        ValidationFields.Secret,
                       );
                     }}
                   />
@@ -131,10 +153,7 @@ const ManagerAccountModal: FC = () => {
                   title={intl.formatMessage({ id: 'action__remove_account' })}
                   titleColor="text-critical"
                   onPress={() => {
-                    if (
-                      wallet?.type === 'imported' ||
-                      wallet?.type === 'watching'
-                    ) {
+                    if (wallet?.type === 'hw' || wallet?.type === 'watching') {
                       showRemoveAccountDialog(
                         walletId,
                         accountId,
@@ -158,6 +177,8 @@ const ManagerAccountModal: FC = () => {
                         );
                       },
                       () => {},
+                      null,
+                      ValidationFields.Account,
                     );
                   }}
                 />

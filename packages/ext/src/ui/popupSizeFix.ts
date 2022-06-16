@@ -2,8 +2,8 @@
 import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
 // Chrome extension popups can have a maximum height of 600px and maximum width of 800px
-export const UI_HTML_DEFAULT_MIN_HEIGHT = 600;
 export const UI_HTML_DEFAULT_MIN_WIDTH = 375;
+export const UI_HTML_DEFAULT_MIN_HEIGHT = 600;
 
 // TODO auto fix on window.addEventListener('resize', reportWindowSize);
 function popupSizeFix() {
@@ -17,7 +17,7 @@ function popupSizeFix() {
   document.documentElement.style.minWidth = `${UI_HTML_DEFAULT_MIN_WIDTH}px`;
 
   // firefox should set to body element, chrome should set to html element
-  if (platformEnv.isFirefox) {
+  if (platformEnv.isRuntimeFirefox) {
     document.body.style.minHeight = `${UI_HTML_DEFAULT_MIN_HEIGHT}px`;
     document.body.style.minWidth = `${UI_HTML_DEFAULT_MIN_WIDTH}px`;
   }

@@ -1,72 +1,27 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useMemo } from 'react';
 
 import { useIntl } from 'react-intl';
 
+import { useIsVerticalLayout } from '@onekeyhq/components';
 import { createBottomTabNavigator } from '@onekeyhq/components/src/Layout/BottomTabs';
 import LayoutHeader from '@onekeyhq/components/src/Layout/Header';
-import { LocaleIds } from '@onekeyhq/components/src/locale';
 import AccountSelector from '@onekeyhq/kit/src/components/Header/AccountSelector';
 import ChainSelector from '@onekeyhq/kit/src/components/Header/ChainSelector';
-import DiscoverScreen from '@onekeyhq/kit/src/views/Discover';
-import MeScreen from '@onekeyhq/kit/src/views/Me';
-import PortfolioScreen from '@onekeyhq/kit/src/views/Portfolio';
-import SwapScreen from '@onekeyhq/kit/src/views/Swap';
-import HomeScreen from '@onekeyhq/kit/src/views/Wallet';
+import { navigationRef } from '@onekeyhq/kit/src/provider/NavigationProvider';
+import { ReceiveTokenRoutes } from '@onekeyhq/kit/src/routes/Modal/routes';
+import { ModalRoutes, RootRoutes } from '@onekeyhq/kit/src/routes/types';
+import { SendRoutes } from '@onekeyhq/kit/src/views/Send/types';
 
 import { TabRoutes, TabRoutesParams } from '../types';
 
+import { getStackTabScreen, tabRoutes } from './routes';
+
 const Tab = createBottomTabNavigator<TabRoutesParams>();
-
-interface TabRouteConfig {
-  name: TabRoutes;
-  translationId: LocaleIds;
-  component: React.FC;
-  tabBarIcon: () => string;
-}
-
-export const tabRoutes: TabRouteConfig[] = [
-  {
-    name: TabRoutes.Home,
-    component: HomeScreen,
-    tabBarIcon: () => 'HomeOutline',
-    translationId: 'title__home',
-  },
-  {
-    name: TabRoutes.Swap,
-    component: SwapScreen,
-    tabBarIcon: () => 'SwitchHorizontalOutline',
-    translationId: 'title__swap',
-  },
-  {
-    name: TabRoutes.Discover,
-    component: DiscoverScreen,
-    tabBarIcon: () => 'CompassOutline',
-    translationId: 'title__explore',
-  },
-  {
-    name: TabRoutes.Me,
-    component: MeScreen,
-    tabBarIcon: () => 'UserOutline',
-    translationId: 'title__me',
-  },
-  ...(() => {
-    if (process.env.NODE_ENV !== 'production') {
-      return [
-        {
-          name: TabRoutes.Portfolio,
-          component: PortfolioScreen,
-          tabBarIcon: () => 'TrendingUpOutline',
-          translationId: 'title__portfolio',
-        },
-      ] as TabRouteConfig[];
-    }
-    return [];
-  })(),
-];
 
 const TabNavigator = () => {
   const intl = useIntl();
+  const isVerticalLayout = useIsVerticalLayout();
 
   const renderHeader = useCallback(
     () => (
@@ -78,25 +33,80 @@ const TabNavigator = () => {
     [],
   );
 
-  return (
-    <Tab.Navigator
-      screenOptions={{
-        lazy: true,
-        header: renderHeader,
-      }}
-    >
-      {tabRoutes.map((tab) => (
-        <Tab.Screen
-          key={tab.name}
-          name={tab.name}
-          component={tab.component}
-          options={{
-            tabBarIcon: tab.tabBarIcon,
-            tabBarLabel: intl.formatMessage({ id: tab.translationId }),
-          }}
-        />
-      ))}
-    </Tab.Navigator>
+  const foldableList = useMemo(
+    () => [
+      {
+        name: TabRoutes.Send,
+        foldable: true,
+        component: () => null,
+        onPress: () => {
+          navigationRef.current?.navigate(RootRoutes.Modal, {
+            screen: ModalRoutes.Send,
+            params: {
+              screen: SendRoutes.PreSendToken,
+              params: {
+                from: '',
+                to: '',
+                amount: '',
+              },
+            },
+          });
+        },
+        tabBarLabel: intl.formatMessage({ id: 'action__send' }),
+        tabBarIcon: () => 'NavSendSolid',
+        description: intl.formatMessage({
+          id: 'content__transfer_tokens_to_another_wallet',
+        }),
+      },
+      {
+        name: TabRoutes.Receive,
+        foldable: true,
+        component: () => null,
+        onPress: () => {
+          navigationRef.current?.navigate(RootRoutes.Modal, {
+            screen: ModalRoutes.Receive,
+            params: {
+              screen: ReceiveTokenRoutes.ReceiveToken,
+              params: {},
+            },
+          });
+        },
+        tabBarLabel: intl.formatMessage({ id: 'action__receive' }),
+        tabBarIcon: () => 'NavReceiveSolid',
+        description: intl.formatMessage({
+          id: 'content__deposit_tokens_to_your_wallet',
+        }),
+      },
+    ],
+    [intl],
+  );
+
+  return useMemo(
+    () => (
+      <Tab.Navigator
+        screenOptions={{
+          lazy: true,
+          header: renderHeader,
+          // @ts-expect-error
+          foldableList,
+        }}
+      >
+        {tabRoutes.map((tab) => (
+          <Tab.Screen
+            key={tab.name}
+            name={tab.name}
+            component={
+              isVerticalLayout ? tab.component : getStackTabScreen(tab.name)
+            }
+            options={{
+              tabBarIcon: tab.tabBarIcon,
+              tabBarLabel: intl.formatMessage({ id: tab.translationId }),
+            }}
+          />
+        ))}
+      </Tab.Navigator>
+    ),
+    [renderHeader, intl, isVerticalLayout, foldableList],
   );
 };
 

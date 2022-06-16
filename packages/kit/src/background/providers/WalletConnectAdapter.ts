@@ -6,14 +6,16 @@ import {
 } from '@onekeyfe/cross-inpage-provider-types';
 import Connector from '@walletconnect/core';
 import * as cryptoLib from '@walletconnect/iso-crypto';
+import { IClientMeta } from '@walletconnect/types';
 import { isWalletConnectSession } from '@walletconnect/utils';
+import { Platform } from 'react-native';
 
 import { IMPL_EVM } from '@onekeyhq/engine/src/constants';
 import debugLogger from '@onekeyhq/shared/src/logger/debugLogger';
 import appStorage from '@onekeyhq/shared/src/storage/appStorage';
 
 import { backgroundClass, backgroundMethod } from '../decorators';
-import { waitForDataLoaded } from '../utils';
+import { delay, waitForDataLoaded } from '../utils';
 
 import type { IBackgroundApi } from '../IBackgroundApi';
 import type {
@@ -111,36 +113,57 @@ class WalletConnectAdapter {
   connector?: WalletConnect;
 
   // TODO once() instead
+  // TODO waitConnectorPeerReady timeout
   async waitConnectorPeerReady({
     connector,
     logName,
+    timeout,
   }: {
     connector: WalletConnect;
     logName: string;
+    timeout: number;
   }) {
     // on("session_request") peerMeta peerId ready
     // needs to wait for this.connector.peerId ready
     await waitForDataLoaded({
-      data: () => Boolean(connector.peerId),
+      data: () => Boolean(connector?.peerId),
       logName,
-      // TODO websocket timeout, maybe uri is wrong or expired
+      timeout,
     });
+  }
+
+  async removeConnectedAccounts(connector: WalletConnect) {
+    const { accounts } = connector;
+    const origin = this.getConnectorOrigin(connector);
+    if (accounts.length && origin) {
+      this.backgroundApi.serviceDapp.removeConnectedAccounts({
+        origin,
+        networkImpl: IMPL_EVM,
+        addresses: accounts,
+      });
+      await delay(1500);
+      this.backgroundApi.serviceAccount.notifyAccountsChanged();
+    }
   }
 
   async _destroyConnector(connector?: WalletConnect) {
     if (connector) {
       this.unregisterEvents(connector);
+
       if (connector.connected) {
-        // TODO timeout 3s
         await this.waitConnectorPeerReady({
           connector,
           logName: 'waitConnectorPeerReady -> disconnect()',
+          timeout: 3 * 1000, // timeout 3s
         });
         await connector.killSession();
       }
+
+      this.removeConnectedAccounts(connector);
     }
   }
 
+  // TODO disconnect 3 days ago sessions
   async autoConnectLastSession() {
     const session = await sessionStorage.getSession();
     let { connector } = this;
@@ -165,10 +188,10 @@ class WalletConnectAdapter {
     this.registerEvents(connector);
 
     // TODO use once('session_request') trigger means pear ready
-    // TODO timeout 10s
     await this.waitConnectorPeerReady({
       connector,
       logName: 'waitConnectorPeerReady -> connect()',
+      timeout: 10 * 1000, //  timeout 10s
     });
 
     if (!connector.connected) {
@@ -189,6 +212,7 @@ class WalletConnectAdapter {
     return Promise.resolve(resp.result);
   }
 
+  // TODO check if current chain is EVM
   async getChainIdInteger(connector: WalletConnect) {
     return parseInt(
       await this.ethereumRequest(connector, { method: 'net_version' }),
@@ -216,15 +240,27 @@ class WalletConnectAdapter {
     }
   }
 
+  // TODO check if current chain is EVM
   @backgroundMethod()
   async connect({ uri }: { uri: string }) {
     // uri network param defaults to evm
     const network = new URL(uri).searchParams.get('network') || IMPL_EVM;
     await this.disconnect();
 
+    const clientMeta: IClientMeta = {
+      description: `OneKey Wallet: ${process.env.ONEKEY_PLATFORM ?? ''} ${
+        process.env.EXT_CHANNEL ?? ''
+      } ${Platform.OS ?? ''}`,
+      url: 'https://www.onekey.so',
+      icons: [],
+      name: 'OneKey Wallet',
+    };
     const connector = new WalletConnect({
       uri,
+      clientMeta,
     });
+    // @ts-ignore
+    connector._clientMeta = clientMeta;
     this.connector = connector;
 
     await this.setupConnector(connector);
@@ -353,6 +389,10 @@ class WalletConnectAdapter {
         debugLogger.walletConnect('EVENT', 'call_request', payload);
         // https://docs.walletconnect.com/client-api#send-custom-request
         // await window.$connector.sendCustomRequest({method:'eth_gasPrice'})
+
+        if (payload.method === 'eth_signTypedData') {
+          payload.method = 'eth_signTypedData_v3';
+        }
         return this.responseCallRequest(
           connector,
           this.ethereumRequest(connector, payload),
@@ -392,11 +432,14 @@ class WalletConnectAdapter {
       const accounts = await this.ethereumRequest(connector, {
         method: 'eth_accounts',
       });
-      // TODO if accounts=[] killSession()
-      connector.updateSession({
-        chainId,
-        accounts,
-      });
+      if (accounts && (accounts as string[]).length) {
+        connector.updateSession({
+          chainId,
+          accounts,
+        });
+      } else {
+        await this.disconnect();
+      }
     }
   }
 }

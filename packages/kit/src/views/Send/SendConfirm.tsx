@@ -1,232 +1,146 @@
-import React, { useCallback, useEffect, useState } from 'react';
+// @ts-nocheck
+/* eslint-disable  */
+import { useEffect, useMemo, useState } from 'react';
 
-import {
-  NavigationProp,
-  RouteProp,
-  useNavigation,
-  useRoute,
-} from '@react-navigation/native';
-import { useIntl } from 'react-intl';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 
-import { Center, Spinner, utils } from '@onekeyhq/components';
-import {
-  HistoryEntryStatus,
-  HistoryEntryType,
-} from '@onekeyhq/engine/src/types/history';
-import { IBroadcastedTx } from '@onekeyhq/engine/src/types/vault';
-import { EVMDecodedTxType } from '@onekeyhq/engine/src/vaults/impl/evm/decoder/decoder';
+import { Box } from '@onekeyhq/components';
+import { IMPL_EVM } from '@onekeyhq/engine/src/constants';
 import { IEncodedTxEvm } from '@onekeyhq/engine/src/vaults/impl/evm/Vault';
-import debugLogger from '@onekeyhq/shared/src/logger/debugLogger';
+import { IEncodedTx } from '@onekeyhq/engine/src/vaults/types';
 
-import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
+import { useManageTokens } from '../../hooks';
 import { useActiveWalletAccount } from '../../hooks/redux';
 import useDappApproveAction from '../../hooks/useDappApproveAction';
 import { useDecodedTx } from '../../hooks/useDecodedTx';
+import { useOnboardingFinished } from '../../hooks/useOnboardingFinished';
+import { wait } from '../../utils/helper';
+import { SwapQuoteTx } from '../Swap/typings';
 
+
+import { SendConfirmModal } from './confirmViews/SendConfirmModal';
+import { DecodeTxButtonTest } from './DecodeTxButtonTest';
+import SendConfirmLegacy from './SendConfirmLegacy';
 import {
-  ITxConfirmViewProps,
-  ITxConfirmViewPropsHandleConfirm,
-  SendConfirmModal,
-} from './confirmViews/SendConfirmModal';
-import { TxConfirmBlind } from './confirmViews/TxConfirmBlind';
-import { TxConfirmTokenApprove } from './confirmViews/TxConfirmTokenApprove';
-import { TxConfirmTransfer } from './confirmViews/TxConfirmTransfer';
-import {
+  SendConfirmParams,
+  SendConfirmPayloadBase,
   SendRoutes,
   SendRoutesParams,
-  TransferSendParamsPayload,
 } from './types';
-import { useFeeInfoPayload } from './useFeeInfoPayload';
 
-type NavigationProps = NavigationProp<SendRoutesParams, SendRoutes.SendConfirm>;
+import type { StackNavigationProp } from '@react-navigation/stack';
+
+type NavigationProps = StackNavigationProp<
+  SendRoutesParams,
+  SendRoutes.SendConfirm
+>;
 type RouteProps = RouteProp<SendRoutesParams, SendRoutes.SendConfirm>;
 
-/*
-await ethereum.request({method:'eth_sendTransaction',params:[{from: "0x76f3f64cb3cd19debee51436df630a342b736c24",
-to: "0x0c54FcCd2e384b4BB6f2E405Bf5Cbc15a017AaFb",
-type: "0x0",
-value: "0x0"}]})
- */
+function useReloadAccountBalance() {
+  // do not remove this line, call account balance fetch
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { balances } = useManageTokens({
+    fetchTokensOnMount: true,
+  });
+}
 
-function removeFeeInfoInTx(encodedTx: IEncodedTxEvm) {
-  // TODO dapp fee should be fixed by decimals
-  // TODO deepClone
-  delete encodedTx.gas;
-  delete encodedTx.gasLimit;
-  delete encodedTx.gasPrice;
+// TODO move to Vault / Service
+async function prepareEncodedTx({
+  encodedTx,
+  networkImpl,
+  sendConfirmParams,
+}: {
+  encodedTx: IEncodedTx;
+  networkImpl: string;
+  sendConfirmParams: SendConfirmParams;
+}): Promise<IEncodedTx> {
+  if (networkImpl === IMPL_EVM) {
+    const tx = encodedTx as IEncodedTxEvm;
+    // remove gas price if encodedTx build by DAPP
+    if (sendConfirmParams.sourceInfo) {
+      // *** DO NOT delete gasLimit here, fetchFeeInfo() will use it to calculate max limit
+      // delete encodedTx.gas;
+      // delete encodedTx.gasLimit;
+
+      // *** DELETE gasPrice and use wallet re-calculated fee price
+      delete tx.gasPrice;
+      delete tx.maxPriorityFeePerGas;
+      delete tx.maxFeePerGas;
+
+      return Promise.resolve(tx);
+    }
+  }
+  return Promise.resolve(encodedTx);
+}
+
+function useSendConfirmEncodedTx({
+  sendConfirmParams,
+  networkImpl,
+}: {
+  networkImpl: string;
+  sendConfirmParams: SendConfirmParams;
+}): IEncodedTx | null {
+  const [encodedTx, setEncodedTx] = useState<IEncodedTx | null>(null);
+  useEffect(() => {
+    prepareEncodedTx({
+      encodedTx: sendConfirmParams.encodedTx,
+      sendConfirmParams,
+      networkImpl,
+    }).then((tx) => setEncodedTx(tx));
+  }, [networkImpl, sendConfirmParams, sendConfirmParams.encodedTx]);
   return encodedTx;
 }
 
-const TransactionConfirm = () => {
-  const intl = useIntl();
+function SendConfirm() {
+  useOnboardingFinished();
+  useReloadAccountBalance();
+  const { accountId, networkId, walletId, networkImpl } =
+    useActiveWalletAccount();
+
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<RouteProps>();
-  const { params } = route;
-  // TODO rename to sourceInfo
-  const isFromDapp = params.sourceInfo;
-  const [encodedTx, setEncodedTx] = useState<IEncodedTxEvm>(
-    isFromDapp
-      ? removeFeeInfoInTx(params.encodedTx as IEncodedTxEvm)
-      : (params.encodedTx as IEncodedTxEvm),
+  const isFromDapp = !!route.params.sourceInfo;
+  const feeInfoEditable = route.params.feeInfoEditable ?? true;
+  const feeInfoUseFeeInTx = route.params.feeInfoUseFeeInTx ?? false;
+  const isSpeedUpOrCancel =
+    route.params.actionType === 'cancel' ||
+    route.params.actionType === 'speedUp';
+  const payload = useMemo(
+    // TODO refactor SendConfirmPayloadBase type like decodedTxAction
+    () => (route.params.payload || {}) as SendConfirmPayloadBase,
+    [route.params.payload],
   );
-  useEffect(() => {
-    setEncodedTx(params.encodedTx);
-  }, [params.encodedTx]);
-  const { decodedTx } = useDecodedTx({ encodedTx });
-  let { accountId, networkId } = useActiveWalletAccount();
 
   const dappApprove = useDappApproveAction({
-    id: params.sourceInfo?.id ?? '',
+    id: route.params.sourceInfo?.id ?? '',
     closeOnError: true,
   });
-  const useFeeInTx = !isFromDapp;
 
-  let payload = params.payload as TransferSendParamsPayload;
-  if (payload) {
-    accountId = payload.account.id;
-    networkId = payload.network.id;
-  } else {
-    // TODO parse encodedTx to payload
-    payload = {} as TransferSendParamsPayload;
-  }
-
-  const { feeInfoPayload, feeInfoLoading } = useFeeInfoPayload({
-    encodedTx,
-    useFeeInTx,
+  const encodedTx = useSendConfirmEncodedTx({
+    sendConfirmParams: route.params,
+    networkImpl,
   });
 
-  useEffect(() => {
-    debugLogger.sendTx(
-      'SendConfirm  >>>>  ',
-      feeInfoPayload,
-      encodedTx,
-      params,
-    );
-  }, [encodedTx, feeInfoPayload, params]);
+  const { decodedTx } = useDecodedTx({ encodedTx, payload });
 
-  const saveHistory = useCallback(
-    (tx: IBroadcastedTx) => {
-      const historyId = `${networkId}--${tx.txid}`;
-      // TODO addHistoryEntryFromEncodedTx({ type, encodedTx, signedTx, payload })
-      backgroundApiProxy.engine.addHistoryEntry({
-        id: historyId,
-        accountId,
-        networkId,
-        type: HistoryEntryType.TRANSFER,
-        status: HistoryEntryStatus.PENDING,
-        meta: {
-          contract: payload.token?.idOnNetwork || '',
-          target: payload.to,
-          value: payload.value,
-          rawTx: tx.rawTx,
-        },
-      });
-    },
-    [
-      accountId,
-      networkId,
-      payload.to,
-      payload.token?.idOnNetwork,
-      payload.value,
-    ],
+  return (
+    <SendConfirmModal>
+      <DecodeTxButtonTest encodedTx={encodedTx} />
+      <Box>{JSON.stringify(decodedTx?.actions)}</Box>
+    </SendConfirmModal>
   );
+}
 
-  const handleConfirm = useCallback<ITxConfirmViewPropsHandleConfirm>(
-    async (options) => {
-      const { close } = options;
-      // eslint-disable-next-line @typescript-eslint/no-shadow
-      const encodedTx = options.encodedTx as IEncodedTxEvm;
-      if (!encodedTx) {
-        return;
-      }
-      if (isFromDapp) {
-        removeFeeInfoInTx(encodedTx);
-      }
-      const encodedTxWithFee =
-        !useFeeInTx && feeInfoPayload
-          ? await backgroundApiProxy.engine.attachFeeInfoToEncodedTx({
-              networkId,
-              accountId,
-              encodedTx,
-              feeInfoValue: feeInfoPayload?.current.value,
-            })
-          : encodedTx;
-      return navigation.navigate(SendRoutes.SendAuthentication, {
-        ...params,
-        encodedTx: encodedTxWithFee,
-        accountId,
-        networkId,
-        // TODO onComplete
-        onSuccess: async (tx) => {
-          saveHistory(tx);
-          backgroundApiProxy.serviceToken.fetchAccountTokens();
-          await dappApprove.resolve({
-            result: tx.txid,
-          });
-          setTimeout(() => close(), 0);
-        },
-      });
-    },
-    [
-      isFromDapp,
-      useFeeInTx,
-      feeInfoPayload,
-      networkId,
-      accountId,
-      navigation,
-      params,
-      saveHistory,
-      dappApprove,
-    ],
-  );
-
-  const sharedProps: ITxConfirmViewProps = {
-    encodedTx,
-    onEncodedTxUpdate: (tx) => setEncodedTx(tx),
-    feeInfoPayload,
-    feeInfoLoading,
-    feeInfoEditable: !useFeeInTx,
-    payload,
-    handleConfirm,
-    onSecondaryActionPress: ({ close }) => {
-      dappApprove.reject();
-      close();
-    },
-    onClose: dappApprove.reject,
-    sourceInfo: params.sourceInfo,
-    decodedTx,
-  };
-
-  if (!decodedTx) {
-    return (
-      <SendConfirmModal {...sharedProps} confirmDisabled>
-        <Center flex="1">
-          <Spinner />
-        </Center>
-      </SendConfirmModal>
-    );
+function SendConfirmProxy() {
+  const { accountId, networkId, walletId, networkImpl } =
+    useActiveWalletAccount();
+  if (networkImpl === IMPL_EVM) {
+    return <SendConfirmLegacy />;
   }
+  return <SendConfirmLegacy />;
+  // return <SendConfirm />;
+}
 
-  if (decodedTx.txType === EVMDecodedTxType.TOKEN_APPROVE) {
-    return <TxConfirmTokenApprove {...sharedProps} />;
-  }
-
-  if (
-    decodedTx.txType === EVMDecodedTxType.NATIVE_TRANSFER ||
-    decodedTx.txType === EVMDecodedTxType.TOKEN_TRANSFER
-  ) {
-    return (
-      <TxConfirmTransfer
-        {...sharedProps}
-        headerDescription={`${intl.formatMessage({
-          id: 'content__to',
-        })}:${utils.shortenAddress(encodedTx.to)}`}
-      />
-    );
-  }
-
-  // Dapp blind sign
-  return <TxConfirmBlind {...sharedProps} />;
-};
-
-export default TransactionConfirm;
+// export default SendConfirm;
+export default SendConfirmProxy;
+export { SendConfirm };

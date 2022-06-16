@@ -4,9 +4,7 @@ import React, {
   ReactElement,
   ReactNode,
   cloneElement,
-  useCallback,
   useMemo,
-  useState,
 } from 'react';
 
 import platformEnv from '@onekeyhq/shared/src/platformEnv';
@@ -19,18 +17,25 @@ import { useUserDevice } from '../Provider/hooks';
 import ScrollView from '../ScrollView';
 import SectionList from '../SectionList';
 import SortableList from '../SortableList';
-import Toast from '../Toast/Custom';
 
 import Desktop from './Container/Desktop';
 import Mobile from './Container/Mobile';
 
 export type ModalProps = {
+  /*
+    we might change Header to Title in future
+  */
   header?: string;
+  /*
+    we might change headerShown to Header in future
+  */
+  headerShown?: boolean;
   headerDescription?: string;
   trigger?: ReactElement<any>;
   visible?: boolean;
   closeable?: boolean;
   closeAction?: () => void;
+  closeOnOverlayClick?: boolean;
   primaryActionTranslationId?: LocaleIds;
   secondaryActionTranslationId?: LocaleIds;
   onBackActionPress?: () => void;
@@ -38,7 +43,7 @@ export type ModalProps = {
     onClose,
     close,
   }: {
-    onClose?: () => void;
+    onClose?: () => void; // TODO remove
     close: () => void;
   }) => void;
   onSecondaryActionPress?: ({ close }: { close: () => void }) => void;
@@ -47,7 +52,9 @@ export type ModalProps = {
   primaryActionProps?: ComponentProps<typeof Button>;
   secondaryActionProps?: ComponentProps<typeof Button>;
   footer?: ReactNode;
+  // TODO remove, use `onModalClose` if you need modal closed event
   onClose?: () => void | boolean;
+  onModalClose?: () => void | boolean;
   onVisibleChange?: (v: boolean) => void;
   scrollViewProps?: ComponentProps<typeof ScrollView>;
   flatListProps?: ComponentProps<typeof FlatList>;
@@ -56,6 +63,10 @@ export type ModalProps = {
   staticChildrenProps?: ComponentProps<typeof Box>;
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   height?: number | string;
+  /*
+    maxHeight work for Desktop Modal
+  */
+  maxHeight?: number | string;
   modalHeight?: string | number | 'full';
 };
 
@@ -63,46 +74,38 @@ const defaultProps = {
   closeable: true,
   size: 'xs',
   height: 'auto',
+  maxHeight: '90%',
   modalHeight: 'full',
+  headerShown: true,
+  closeOnOverlayClick: true,
 } as const;
 
 const Modal: FC<ModalProps> = ({
   trigger,
   visible: outerVisible,
   onClose,
+  onModalClose,
   sectionListProps,
   flatListProps,
   scrollViewProps,
   staticChildrenProps,
   sortableListProps,
   header,
+  headerShown,
   modalHeight,
   ...rest
 }) => {
   const { size } = useUserDevice();
-  const [innerVisible, setInnerVisible] = useState(false);
-  const visible = outerVisible ?? innerVisible;
-
-  const handleClose = useCallback(() => {
-    if (typeof onClose === 'function') {
-      const status = onClose();
-      // only onClose return false, will not trigger modal close
-      if (status === false) return;
-    }
-    setInnerVisible((v) => !v);
-  }, [onClose]);
-
-  const handleOpen = useCallback(() => {
-    setInnerVisible((v) => !v);
-  }, []);
 
   const modalContent = useMemo(() => {
     if (sectionListProps) {
       return (
         <SectionList
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
             paddingBottom: 24,
-            paddingTop: header ? 24 : 0,
+            // eslint-disable-next-line no-nested-ternary
+            paddingTop: headerShown ? (header ? 24 : 0) : 24,
           }}
           px={{ base: 4, md: 6 }}
           {...sectionListProps}
@@ -113,9 +116,11 @@ const Modal: FC<ModalProps> = ({
     if (flatListProps) {
       return (
         <FlatList
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
             paddingBottom: 24,
-            paddingTop: header ? 24 : 0,
+            // eslint-disable-next-line no-nested-ternary
+            paddingTop: headerShown ? (header ? 24 : 0) : 24,
           }}
           px={{ base: 4, md: 6 }}
           {...flatListProps}
@@ -126,9 +131,11 @@ const Modal: FC<ModalProps> = ({
     if (scrollViewProps) {
       return (
         <ScrollView
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{
             paddingBottom: 24,
-            paddingTop: header ? 24 : 0,
+            // eslint-disable-next-line no-nested-ternary
+            paddingTop: headerShown ? (header ? 24 : 0) : 24,
           }}
           px={{ base: 4, md: 6 }}
           {...scrollViewProps}
@@ -159,7 +166,13 @@ const Modal: FC<ModalProps> = ({
     }
 
     return (
-      <Box pt={header ? 6 : 0} pb={6} px={{ base: 4, md: 6 }} flex="1">
+      <Box
+        // eslint-disable-next-line no-nested-ternary
+        pt={headerShown ? (header ? 6 : 0) : 6}
+        pb={6}
+        px={{ base: 4, md: 6 }}
+        flex="1"
+      >
         {rest.children}
       </Box>
     );
@@ -171,26 +184,34 @@ const Modal: FC<ModalProps> = ({
     sortableListProps,
     rest.children,
     header,
+    headerShown,
   ]);
 
   const modalContainer = useMemo(() => {
-    if (['SMALL', 'NORMAL'].includes(size)) {
+    /*
+      Why `platformEnv.isNativeIOS` ?
+      We want to use the native modal component in iPad which screen width might bigger then NORMAL breakpoint
+    */
+    if (['SMALL', 'NORMAL'].includes(size) || platformEnv.isNativeIOS) {
       return (
         <Box flex={1} alignItems="flex-end" w="100%" flexDirection="row">
           <Box
             height={modalHeight}
             // TODO 100vh in App
-            maxHeight={platformEnv.isBrowser ? '100vh' : undefined}
+            maxHeight={platformEnv.isRuntimeBrowser ? '100vh' : undefined}
             w="100%"
             borderTopRadius={
-              platformEnv.isExtensionUiStandaloneWindow ? 0 : '24px'
+              platformEnv.isExtensionUiStandaloneWindow ||
+              platformEnv.isNativeAndroid
+                ? 0
+                : '24px'
             }
             overflow="hidden"
           >
             <Mobile
+              onClose={onModalClose}
+              headerShown={headerShown}
               header={header}
-              visible={visible}
-              onClose={handleClose}
               {...rest}
             >
               {modalContent}
@@ -202,31 +223,40 @@ const Modal: FC<ModalProps> = ({
 
     return (
       <Desktop
+        onClose={onModalClose}
+        headerShown={headerShown}
         header={header}
-        visible={visible}
-        onClose={handleClose}
         {...rest}
       >
         {modalContent}
       </Desktop>
     );
-  }, [size, header, visible, handleClose, rest, modalContent, modalHeight]);
+  }, [
+    size,
+    onModalClose,
+    headerShown,
+    header,
+    rest,
+    modalContent,
+    modalHeight,
+  ]);
 
   const triggerNode = useMemo(() => {
     if (!trigger) return null;
     return cloneElement(trigger, {
       /* eslint @typescript-eslint/no-unsafe-member-access: "off" */
-      onPress: trigger.props.onPress ?? handleOpen,
+      onPress: trigger.props.onPress,
     });
-  }, [trigger, handleOpen]);
+  }, [trigger]);
 
-  return (
+  const node = (
     <>
       {triggerNode}
       {modalContainer}
-      <Toast bottomOffset={120} />
     </>
   );
+
+  return node;
 };
 
 Modal.defaultProps = defaultProps;

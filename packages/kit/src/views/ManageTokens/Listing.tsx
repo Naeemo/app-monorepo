@@ -12,12 +12,13 @@ import {
   Empty,
   Icon,
   IconButton,
-  Image,
   Modal,
   Pressable,
   Searchbar,
   Spinner,
+  Token as TokenImage,
   Typography,
+  useToast,
   utils,
 } from '@onekeyhq/components';
 import { Text } from '@onekeyhq/components/src/Typography';
@@ -26,7 +27,12 @@ import IconSearch from '@onekeyhq/kit/assets/3d_search.png';
 
 import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
 import { FormatBalance } from '../../components/Format';
-import { useDebounce, useManageTokens, useToast } from '../../hooks';
+import {
+  useAccountTokens,
+  useDebounce,
+  useManageTokens,
+  useNetworkTokens,
+} from '../../hooks';
 import { useActiveWalletAccount } from '../../hooks/redux';
 import { timeout } from '../../utils/helper';
 
@@ -106,25 +112,9 @@ const HeaderTokens: FC<HeaderTokensProps> = ({
                 bg="surface-default"
                 _hover={{ bgColor: 'surface-hovered' }}
                 _pressed={{ bgColor: 'surface-pressed' }}
-                shadow="depth.2"
               >
                 <Box display="flex" alignItems="center" flexDirection="row">
-                  <Image
-                    source={{ uri: item.logoURI }}
-                    alt="logoURI"
-                    size="8"
-                    borderRadius="full"
-                    fallbackElement={
-                      <Center
-                        w={8}
-                        h={8}
-                        rounded="full"
-                        bgColor="surface-neutral-default"
-                      >
-                        <Icon size={20} name="QuestionMarkOutline" />
-                      </Center>
-                    }
-                  />
+                  <TokenImage size={8} src={item.logoURI} />
                   <Box ml="3">
                     <Text
                       maxW={56}
@@ -267,24 +257,29 @@ const ListingToken: FC<ListingTokenProps> = ({
   borderBottomRadius,
 }) => {
   const navigation = useNavigation<NavigationProps>();
+  const { accountId, networkId } = useActiveWalletAccount();
+  const accountTokens = useAccountTokens(networkId, accountId);
   const intl = useIntl();
   const toast = useToast();
-  const { accountTokensMap } = useManageTokens();
+  const accountTokensMap = useMemo(
+    () => new Set(accountTokens.map((token) => token.tokenIdOnNetwork)),
+    [accountTokens],
+  );
   const isOwned = accountTokensMap.has(item.tokenIdOnNetwork);
-  const { account: activeAccount, network: activeNetwork } =
-    useActiveWalletAccount();
+
   const onPress = useCallback(async () => {
-    if (activeAccount && activeNetwork) {
+    if (accountId && networkId) {
       try {
         await timeout(
           backgroundApiProxy.engine.quickAddToken(
-            activeAccount?.id,
-            activeNetwork.id,
+            accountId,
+            networkId,
             item.tokenIdOnNetwork,
           ),
           5000,
         );
       } catch (e) {
+        console.error(e);
         toast.show({
           title: intl.formatMessage({ id: 'msg__failed_to_add_token' }),
         });
@@ -292,9 +287,9 @@ const ListingToken: FC<ListingTokenProps> = ({
       }
       toast.show({ title: intl.formatMessage({ id: 'msg__token_added' }) });
       backgroundApiProxy.serviceToken.fetchAccountTokens();
-      backgroundApiProxy.serviceToken.fetchTokens();
+      backgroundApiProxy.serviceToken.fetchTokens(accountId, networkId);
     }
-  }, [intl, activeAccount, activeNetwork, toast, item.tokenIdOnNetwork]);
+  }, [intl, accountId, networkId, toast, item.tokenIdOnNetwork]);
   const onDetail = useCallback(() => {
     const {
       name,
@@ -328,25 +323,9 @@ const ListingToken: FC<ListingTokenProps> = ({
       bg="surface-default"
       _hover={{ bgColor: 'surface-hovered' }}
       _pressed={{ bgColor: 'surface-pressed' }}
-      shadow="depth.2"
     >
       <Box display="flex" alignItems="center" flexDirection="row">
-        <Image
-          source={{ uri: item.logoURI }}
-          alt="logoURI"
-          size="8"
-          borderRadius="full"
-          fallbackElement={
-            <Center
-              w={8}
-              h={8}
-              rounded="full"
-              bgColor="surface-neutral-default"
-            >
-              <Icon size={20} name="QuestionMarkOutline" />
-            </Center>
-          }
-        />
+        <TokenImage size={8} src={item.logoURI} />
         <Box ml="3">
           <Text
             typography={{ sm: 'Body1Strong', md: 'Body2Strong' }}
@@ -386,18 +365,23 @@ const ListingToken: FC<ListingTokenProps> = ({
 export const Listing: FC = () => {
   const intl = useIntl();
   const navigation = useNavigation<NavigationProps>();
-  const { accountTokens, allTokens } = useManageTokens();
+  const {
+    network: activeNetwork,
+    accountId,
+    networkId,
+  } = useActiveWalletAccount();
+  const accountTokens = useAccountTokens(networkId, accountId);
+  const allTokens = useNetworkTokens(networkId);
+
   const [keyword, setKeyword] = useState<string>('');
   const [mylist, setMylist] = useState<Token[]>([]);
   const searchTerm = useDebounce(keyword, 1000);
 
-  const { account: activeAccount, network: activeNetwork } =
-    useActiveWalletAccount();
   const { loading, searchedTokens } = useSearchTokens(
     searchTerm,
     keyword,
-    activeNetwork?.id,
-    activeAccount?.id,
+    networkId,
+    accountId,
   );
 
   const [visible, setVisible] = useState(false);
@@ -417,20 +401,21 @@ export const Listing: FC = () => {
   }, []);
 
   const onDelete = useCallback(async () => {
-    if (activeAccount && toDeletedToken) {
+    if (accountId && toDeletedToken) {
       await backgroundApiProxy.engine.removeTokenFromAccount(
-        activeAccount.id,
+        accountId,
         toDeletedToken?.id,
       );
     }
     onToggleDeleteDialog(undefined);
     backgroundApiProxy.serviceToken.fetchAccountTokens();
-  }, [activeAccount, toDeletedToken, onToggleDeleteDialog]);
+  }, [accountId, toDeletedToken, onToggleDeleteDialog]);
 
   useFocusEffect(
     useCallback(() => {
       backgroundApiProxy.serviceToken.fetchAccountTokens();
-      backgroundApiProxy.serviceToken.fetchTokens();
+      backgroundApiProxy.serviceToken.fetchTokens(accountId, networkId);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
   );
 

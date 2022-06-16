@@ -10,19 +10,28 @@ import {
   SignedTx,
   UnsignedTx,
 } from '@onekeyfe/blockchain-libs/dist/types/provider';
+import { web3Errors } from '@onekeyfe/cross-inpage-provider-errors';
 import OneKeyConnect, {
   ApplySettings,
   EthereumAddress,
   EthereumTransaction,
   Features,
-} from '@onekeyfe/connect';
+  Success,
+  Unsuccessful,
+} from '@onekeyfe/js-sdk';
 
-import { IMPL_EVM, SEPERATOR } from './constants';
+import type { IPrepareHardwareAccountsParams } from '@onekeyhq/engine/src/vaults/types';
+
+import { IMPL_EVM } from './constants';
+import * as engineUtils from './engineUtils';
 import {
   NotImplemented,
   OneKeyHardwareError,
   OneKeyInternalError,
 } from './errors';
+import { ETHMessageTypes } from './types/message';
+
+import type { IUnsignedMessageEvm } from './vaults/impl/evm/Vault';
 
 /**
  * Get hardware wallet info
@@ -42,7 +51,10 @@ export async function getFeatures(): Promise<Features> {
     return response.payload;
   }
   console.error(response.payload);
-  throw new OneKeyHardwareError(`getFeatures: ${response.payload.error}`);
+  throw new OneKeyHardwareError({
+    code: response.payload.code,
+    message: response.payload.error,
+  });
 }
 
 /**
@@ -65,7 +77,10 @@ export async function changePin(remove = false): Promise<void> {
     return;
   }
   console.error(response.payload);
-  throw new OneKeyHardwareError(`changePin: ${response.payload.error}`);
+  throw new OneKeyHardwareError({
+    code: response.payload.code,
+    message: `changePin: ${response.payload.error}`,
+  });
 }
 
 /**
@@ -84,7 +99,10 @@ export async function applySettings(settings: ApplySettings): Promise<void> {
     return;
   }
   console.error(response.payload);
-  throw new OneKeyHardwareError(`applySettings: ${response.payload.error}`);
+  throw new OneKeyHardwareError({
+    code: response.payload.code,
+    message: `applySettings: ${response.payload.error}`,
+  });
 }
 /**
  * get Eth address from the hardware wallet with the specified derivation path
@@ -108,18 +126,33 @@ export async function ethereumGetAddress(
     throw new OneKeyHardwareError(error);
   }
   if (response.success) {
-    return response.payload.address;
+    return engineUtils.fixAddressCase({
+      address: response.payload.address,
+      impl: IMPL_EVM,
+    });
   }
   console.error(response.payload);
-  throw new OneKeyHardwareError(
-    `ethereumGetAddress: ${response.payload.error}`,
-  );
+  throw new OneKeyHardwareError({
+    code: response.payload.code,
+    message: response.payload.error,
+  });
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function solanaSignTransaction(...args: any[]): Promise<any> {
   throw new NotImplemented();
 }
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function btcSignTransaction(...args: any[]): Promise<any> {
+  throw new NotImplemented();
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function nearSignTransaction(...args: any[]): Promise<any> {
+  throw new NotImplemented();
+}
+
 /**
  * get Solana address from the hardware wallet with the specified derivation path
  * @param path drivation path
@@ -148,6 +181,75 @@ export async function solanaGetAddress(
   // throw new OneKeyHardwareError(`solanaGetAddress: ${response.payload.error}`);
   console.error('Not implemented', path, display);
   return Promise.reject(new Error('not implemented'));
+}
+
+function getResultFromResponse<T>(response: Unsuccessful | Success<T>): T {
+  if (!response.success) {
+    const { error, code } = response.payload;
+    throw new OneKeyHardwareError({
+      code,
+      message: error,
+    });
+  }
+  return response.payload;
+}
+
+export async function ethereumSignMessage({
+  path,
+  message,
+}: {
+  path: string;
+  message: IUnsignedMessageEvm;
+}): Promise<string> {
+  // const features = await getFeatures();
+  if (
+    message.type === ETHMessageTypes.ETH_SIGN ||
+    message.type === ETHMessageTypes.TYPED_DATA_V1
+  ) {
+    throw web3Errors.provider.unsupportedMethod(
+      `Sign message method=${message.type} not supported for this device`,
+    );
+  }
+  if (message.type === ETHMessageTypes.PERSONAL_SIGN) {
+    const res = await OneKeyConnect.ethereumSignMessage({
+      path,
+      message: message.message,
+      hex: true, // TODO non hex sign (utf8)
+    });
+    const result = getResultFromResponse(res);
+    return `0x${result?.signature || ''}`;
+  }
+  if (message.type === ETHMessageTypes.TYPED_DATA_V3) {
+    // TODO try catch
+    const data = JSON.parse(message.message);
+    // TODO use OneKeyConnect.ethereumSignTypedData()
+    const res = await OneKeyConnect.ethereumSignMessageEIP712({
+      path,
+      data,
+      version: 'V3',
+      // metamask_v4_compat: false,
+    });
+    const result = getResultFromResponse(res);
+    return `0x${result?.signature || ''}`;
+  }
+  if (message.type === ETHMessageTypes.TYPED_DATA_V4) {
+    // TODO try catch
+    const data = JSON.parse(message.message);
+    console.log('ethereumSignTypedData V4 data', data);
+    // TODO use OneKeyConnect.ethereumSignTypedData()
+    const res = await OneKeyConnect.ethereumSignMessageEIP712({
+      path,
+      data,
+      version: 'V4',
+      // metamask_v4_compat: true,
+    });
+    const result = getResultFromResponse(res);
+    return `0x${result?.signature || ''}`;
+  }
+  throw web3Errors.rpc.methodNotFound(
+    // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
+    `Sign message method=${message.type} not found`,
+  );
 }
 
 /**
@@ -180,11 +282,14 @@ export async function ethereumSignTransaction(
     throw new OneKeyInternalError('Incomplete unsigned tx.');
   }
 
+  // TODO: seperate EIP1559/legacy once connect supports EIP1559.
   const txToSign: EthereumTransaction = {
     to,
     value,
     gasPrice: toBigIntHex(
-      unsignedTx.feePricePerUnit || unsignedTx.payload.maxFeePerGas,
+      unsignedTx.payload?.EIP1559Enabled
+        ? unsignedTx.payload.maxFeePerGas
+        : unsignedTx.feePricePerUnit,
     ),
     gasLimit: toBigIntHex(unsignedTx.feeLimit),
     nonce: `0x${unsignedTx.nonce.toString(16)}`,
@@ -225,9 +330,10 @@ export async function ethereumSignTransaction(
     return { txid, rawTx };
   }
   console.error(response.payload);
-  throw new OneKeyHardwareError(
-    `ethereumSignTransaction: ${response.payload.error}`,
-  );
+  throw new OneKeyHardwareError({
+    code: response.payload.code,
+    message: response.payload.error,
+  });
 }
 
 export async function ethereumSignTxEIP1559(
@@ -241,6 +347,7 @@ export async function getXpubs(
   impl: string,
   paths: Array<string>,
   outputFormat: 'xpub' | 'pub' | 'address',
+  type: IPrepareHardwareAccountsParams['type'],
 ): Promise<Array<{ path: string; info: string }>> {
   if (impl !== IMPL_EVM || outputFormat !== 'address') {
     return Promise.resolve([]);
@@ -250,7 +357,13 @@ export async function getXpubs(
   try {
     if (paths.length > 1) {
       response = await OneKeyConnect.ethereumGetAddress({
-        bundle: paths.map((path) => ({ path, showOnTrezor: false })),
+        bundle: paths.map((path) => ({
+          path,
+          /**
+           * Search accounts not show detail at device.Only show on device when add accounts into wallet.
+           */
+          showOnTrezor: type === 'ADD_ACCOUNTS',
+        })),
       });
     } else {
       response = await OneKeyConnect.ethereumGetAddress({ path: paths[0] });
@@ -264,31 +377,23 @@ export async function getXpubs(
       return (response.payload as EthereumAddress[]).map(
         ({ serializedPath, address }) => ({
           path: serializedPath,
-          info: address,
+          info: engineUtils.fixAddressCase({ address, impl }),
         }),
       );
     }
     return [
       {
         path: (response.payload as EthereumAddress).serializedPath,
-        info: (response.payload as EthereumAddress).address,
+        info: engineUtils.fixAddressCase({
+          address: (response.payload as EthereumAddress).address,
+          impl,
+        }),
       },
     ];
   }
   console.error(response.payload);
-  throw new OneKeyHardwareError(
-    `ethereumGetAddress: ${response.payload.error}`,
-  );
-}
-
-export async function signTransaction(
-  networkId: string,
-  path: string,
-  unsignedTx: UnsignedTx,
-): Promise<SignedTx> {
-  const [impl, chainId] = networkId.split(SEPERATOR);
-  if (impl === IMPL_EVM) {
-    return ethereumSignTransaction(path, chainId, unsignedTx);
-  }
-  throw new NotImplemented();
+  throw new OneKeyHardwareError({
+    code: response.payload.code,
+    message: response.payload.error,
+  });
 }

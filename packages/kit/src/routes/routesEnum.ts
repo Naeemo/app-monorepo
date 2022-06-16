@@ -8,17 +8,16 @@ export enum ModalRoutes {
   ManagerWallet = 'ManagerWallet',
   ManagerAccount = 'ManagerAccount',
   WalletViewMnemonics = 'WalletViewMnemonics',
+  // Found screens with the same name nested inside one another. Check:
+  //    modal > Send, modal > Send > Send
   Send = 'Send',
   Receive = 'Receive',
+  FiatPay = 'FiatPay',
   SubmitRequest = 'SubmitRequest',
   HistoryRequest = 'HistoryRequest',
   TransactionDetail = 'TransactionDetail',
   OnekeyLiteReset = 'OnekeyLiteReset',
   OnekeyLiteChangePinInputPin = 'OnekeyLiteChangePinInputPin',
-  DappApproveModal = 'DappApproveModal',
-  DappSendConfirmModal = 'DappSendConfirmModal',
-  DappMulticallModal = 'DappMulticallModal',
-  DappSignatureModal = 'DappSignatureModal',
   DappConnectionModal = 'DappConnectionModal',
   Password = 'Password',
   ManageToken = 'ManageToken',
@@ -28,15 +27,15 @@ export enum ModalRoutes {
   OnekeyHardware = 'OnekeyHardware',
   Discover = 'Discover',
   Swap = 'Swap',
+  ScanQrcode = 'ScanQrcode',
+  UpdateFeature = 'UpdateFeature',
 }
 export enum DappModalRoutes {
   ConnectionModal = 'ConnectionModal',
-  ApproveModal = 'ApproveModal',
-  MulticallModal = 'MulticallModal',
-  SendConfirmModal = 'SendConfirmModal',
 }
 export enum RootRoutes {
   Root = 'root',
   Modal = 'modal',
   Tab = 'tab',
+  Welcome = 'Welcome',
 }

@@ -8,11 +8,12 @@ import React, {
   useState,
 } from 'react';
 
-import { Modal as NBModal, Pressable } from 'native-base';
+import { Modal as NBModal } from 'native-base';
 import { Keyboard, Platform } from 'react-native';
 import Modal from 'react-native-modal';
 
 import Box from '../Box';
+import Pressable from '../Pressable';
 
 import DialogCommon from './components';
 
@@ -52,6 +53,7 @@ const Outer: FC<OuterContainerProps> = ({
 
   return (
     <Modal
+      avoidKeyboard
       backdropColor="rgba(0, 0, 0, 0.6)"
       animationOut="fadeOut"
       animationIn="fadeIn"
@@ -72,7 +74,7 @@ export type DialogProps = {
    */
   visible?: boolean;
   /**
-   * 点击 dialog 外面是否可以关闭 dialog，默认：true
+   * 点击 dialog 外面是否可以关闭 dialog，默认：false
    */
   canceledOnTouchOutside?: boolean;
   contentProps?: ComponentProps<typeof DialogCommon.Content>;

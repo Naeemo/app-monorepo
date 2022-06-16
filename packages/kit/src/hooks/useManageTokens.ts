@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo } from 'react';
 
+import { useIsFocused } from '@react-navigation/native';
+import { merge } from 'lodash';
+
 import { Token } from '@onekeyhq/engine/src/types/token';
 
 import backgroundApiProxy from '../background/instance/backgroundApiProxy';
@@ -8,7 +11,13 @@ import { useAppSelector } from './redux';
 
 export const useManageTokens = ({
   pollingInterval = 0,
-}: { pollingInterval?: number } = {}) => {
+  fetchTokensOnMount = false,
+}: {
+  pollingInterval?: number;
+  fetchTokensOnMount?: boolean;
+} = {}) => {
+  const isFocused = useIsFocused();
+
   const { activeAccountId, activeNetworkId } = useAppSelector((s) => s.general);
   const {
     tokens,
@@ -61,7 +70,8 @@ export const useManageTokens = ({
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined;
-    if (pollingInterval) {
+    if (pollingInterval && isFocused && activeAccountId && activeNetworkId) {
+      // TODO may cause circular refresh in UI
       backgroundApiProxy.serviceToken.fetchAccountTokens();
       timer = setInterval(() => {
         backgroundApiProxy.serviceToken.fetchAccountTokens();
@@ -72,13 +82,36 @@ export const useManageTokens = ({
         clearInterval(timer);
       }
     };
-  }, [pollingInterval]);
+  }, [isFocused, pollingInterval, activeAccountId, activeNetworkId]);
+
+  useEffect(() => {
+    if (fetchTokensOnMount) {
+      // TODO may cause circular refresh in UI
+      backgroundApiProxy.serviceToken.fetchAccountTokens();
+    }
+  }, [fetchTokensOnMount]);
 
   const getTokenBalance = useCallback(
-    (token: Token | undefined | null, defaultValue = ''): string => {
+    (
+      options: {
+        token?: Token | null;
+        defaultValue?: string;
+        tokenIdOnNetwork?: string;
+      } = {},
+    ): string => {
+      const { token, defaultValue, tokenIdOnNetwork } = merge(
+        {
+          token: null,
+          defaultValue: '',
+          tokenIdOnNetwork: '',
+        },
+        options ?? {},
+      );
+      const tokenInfo = token as Token | null;
       const balance =
-        balances[token?.tokenIdOnNetwork || 'main'] ?? defaultValue;
-      return balance as string;
+        balances[tokenIdOnNetwork || tokenInfo?.tokenIdOnNetwork || 'main'] ??
+        defaultValue;
+      return balance;
     },
     [balances],
   );

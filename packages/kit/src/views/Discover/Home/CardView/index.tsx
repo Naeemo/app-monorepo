@@ -9,6 +9,7 @@ import {
   Typography,
   useIsVerticalLayout,
 } from '@onekeyhq/components';
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
 import DAppIcon from '../../DAppIcon';
 import { DAppItemType } from '../../type';
@@ -35,6 +36,8 @@ const CardViewMobile: FC<SectionDataType> = ({ title, data, onItemSelect }) => {
           borderRadius="12px"
           padding="16px"
           alignItems="center"
+          borderWidth={1}
+          borderColor="border-subdued"
         >
           <DAppIcon size={48} favicon={item.favicon} chain={item.chain} />
           <Typography.Body2Strong numberOfLines={1} mt="12px">
@@ -60,7 +63,7 @@ const CardViewMobile: FC<SectionDataType> = ({ title, data, onItemSelect }) => {
         contentContainerStyle={{
           paddingRight: 16,
         }}
-        showsHorizontalScrollIndicator={false}
+        showsHorizontalScrollIndicator={!platformEnv.isNative}
         horizontal
         data={filterData}
         renderItem={renderItem}
@@ -90,34 +93,37 @@ const CardViewDesktop: FC<SectionDataType> = ({
         minWidth={cardWidth}
         height={176}
         paddingX="8px"
+        justifyContent="center"
+        alignItems="center"
       >
         <Pressable
+          bgColor="surface-default"
+          flexDirection="column"
+          borderRadius="12px"
+          padding="16px"
+          width={cardWidth - 16}
+          height={164}
+          borderWidth={1}
+          _hover={{ bgColor: 'surface-hovered' }}
+          borderColor="border-subdued"
           onPress={() => {
             if (onItemSelect) {
               onItemSelect(item);
             }
           }}
         >
-          <Box
-            bgColor="surface-default"
-            flexDirection="column"
-            borderRadius="12px"
-            padding="16px"
-            height={164}
+          <DAppIcon size={48} favicon={item.favicon} chain={item.chain} />
+          <Typography.Body2Strong numberOfLines={1} mt="12px">
+            {item.name}
+          </Typography.Body2Strong>
+          <Typography.Caption
+            numberOfLines={3}
+            mt="4px"
+            textAlign="left"
+            color="text-subdued"
           >
-            <DAppIcon size={48} favicon={item.favicon} chain={item.chain} />
-            <Typography.Body2Strong numberOfLines={1} mt="12px">
-              {item.name}
-            </Typography.Body2Strong>
-            <Typography.Caption
-              numberOfLines={3}
-              mt="4px"
-              textAlign="left"
-              color="text-subdued"
-            >
-              {item.subtitle}
-            </Typography.Caption>
-          </Box>
+            {item.subtitle}
+          </Typography.Caption>
         </Pressable>
       </Box>
     ),

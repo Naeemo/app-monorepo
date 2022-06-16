@@ -3,104 +3,38 @@ import React, { memo } from 'react';
 
 import { createStackNavigator } from '@react-navigation/stack';
 
+import { DialogManager } from '@onekeyhq/components';
+import Toast from '@onekeyhq/components/src/Toast/Custom';
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
+
 import { ModalRoutes, ModalRoutesParams } from '../types';
 
-import {
-  BackupWalletModalStack as BackupWalletModal,
-  BackupWalletModalRoutes,
-  BackupWalletRoutesParams,
-  BackupWalletViewMnemonicsModalStack as BackupWalletViewMnemonicsModal,
-} from './BackupWallet';
-import CollectibleModal, {
-  CollectiblesModalRoutes,
-  CollectiblesRoutesParams,
-} from './Collectibles';
-import CreateAccountModal, {
-  CreateAccountModalRoutes,
-  CreateAccountRoutesParams,
-} from './CreateAccount';
-import CreateWalletModalStack, {
-  CreateWalletModalRoutes,
-  CreateWalletRoutesParams,
-} from './CreateWallet';
-import DappApproveStack, {
-  DappApproveModalRoutes,
-  DappApproveRoutesParams,
-} from './DappApprove';
-import DappConnectionStack, {
-  DappConnectionModalRoutes,
-  DappConnectionRoutesParams,
-} from './DappConnection';
-import DappMulticallStack, {
-  DappMulticallModalRoutes,
-  DappMulticallRoutesParams,
-} from './DappMulticall';
-import DappSendStack, {
-  DappSendModalRoutes,
-  DappSendRoutesParams,
-} from './DappSend';
-import DappSignatureStack, {
-  DappSignatureModalRoutes,
-  DappSignatureRoutesParams,
-} from './DappSignature';
+import BackupWalletModal from './BackupWallet';
+import CollectibleModal from './Collectibles';
+import CreateAccountModal from './CreateAccount';
+import CreateWalletModalStack from './CreateWallet';
+import DappConnectionStack from './DappConnection';
 import DiscoverModal from './Discover';
 import EnableLocalAuthenticationModal from './EnableLocalAuthentication';
-import OnekeyHardwareModal, {
-  OnekeyHardwareModalRoutes,
-  OnekeyHardwareRoutesParams,
-} from './HardwareOnekey';
-import HardwareOnekeyLitePinModal, {
-  OnekeyLiteChangePinModalRoutes,
-  OnekeyLiteChangePinRoutesParams,
-} from './HardwareOnekeyLiteChangePin';
-import HardwareOnekeyResetModal, {
-  OnekeyLiteResetModalRoutes,
-  OnekeyLiteResetRoutesParams,
-} from './HardwareOnekeyLiteReset';
-import HistoryRequestModal, {
-  HistoryRequestModalRoutesParams,
-  HistoryRequestRoutes,
-} from './HistoryRequest';
-import ImportAccountModal, {
-  ImportAccountModalRoutes,
-  ImportAccountRoutesParams,
-} from './ImportAccount';
+import BuyModal from './FiatPay';
+import OnekeyHardwareModal from './HardwareOnekey';
+import HardwareOnekeyLitePinModal from './HardwareOnekeyLiteChangePin';
+import HardwareOnekeyResetModal from './HardwareOnekeyLiteReset';
+import HistoryRequestModal from './HistoryRequest';
+import ImportAccountModal from './ImportAccount';
 import ManageNetworkModal from './ManageNetwork';
-import {
-  ManagerAccountModalStack as ManagerAccountModal,
-  ManagerAccountModalRoutes,
-  ManagerAccountRoutesParams,
-} from './ManagerAccount';
-import {
-  ManagerWalletModalStack as ManagerWalletModal,
-  ManagerWalletModalRoutes,
-  ManagerWalletRoutesParams,
-} from './ManagerWallet';
+import { ManagerAccountModalStack as ManagerAccountModal } from './ManagerAccount';
+import { ManagerWalletModalStack as ManagerWalletModal } from './ManagerWallet';
 import ManageTokenModal from './ManageToken';
-import PasswordModal, {
-  PasswordRoutes,
-  PasswordRoutesParams,
-} from './Password';
-import ReceiveToken, {
-  ReceiveTokenRoutes,
-  ReceiveTokenRoutesParams,
-} from './ReceiveToken';
-import Send, { SendRoutes, SendRoutesParams } from './Send';
-import SubmitRequestModal, {
-  SubmitRequestModalRoutesParams,
-  SubmitRequestRoutes,
-} from './SubmitRequest';
+import PasswordModal from './Password';
+import ReceiveToken from './ReceiveToken';
+import ScanQrcode from './ScanQrcode';
+import Send from './Send';
+import SubmitRequestModal from './SubmitRequest';
 import SwapModal from './Swap';
-import TransactionDetailModal, {
-  TransactionDetailModalRoutes,
-  TransactionDetailRoutesParams,
-} from './TransactionDetail';
-import WatchedAccountModal, {
-  WatchedAccountModalRoutes,
-  WatchedAccountRoutesParams,
-} from './WatchedAccount';
-
-import type { NavigatorScreenParams } from '@react-navigation/native';
+import TransactionDetailModal from './TransactionDetail';
+import UpdateFeatureModal from './UpdateFeature';
+import WatchedAccountModal from './WatchedAccount';
 
 export enum ModalNavigatorRoutes {
   ReceiveTokenNavigator = 'ReceiveTokenNavigator',
@@ -121,12 +55,12 @@ const modalStackScreenList = [
     component: Send,
   },
   {
-    name: ModalRoutes.BackupWallet,
-    component: BackupWalletModal,
+    name: ModalRoutes.ScanQrcode,
+    component: ScanQrcode,
   },
   {
-    name: ModalRoutes.WalletViewMnemonics,
-    component: BackupWalletViewMnemonicsModal,
+    name: ModalRoutes.BackupWallet,
+    component: BackupWalletModal,
   },
   {
     name: ModalRoutes.TransactionDetail,
@@ -165,24 +99,8 @@ const modalStackScreenList = [
     component: HardwareOnekeyLitePinModal,
   },
   {
-    name: ModalRoutes.DappApproveModal,
-    component: DappApproveStack,
-  },
-  {
     name: ModalRoutes.DappConnectionModal,
     component: DappConnectionStack,
-  },
-  {
-    name: ModalRoutes.DappMulticallModal,
-    component: DappMulticallStack,
-  },
-  {
-    name: ModalRoutes.DappSendConfirmModal,
-    component: DappSendStack,
-  },
-  {
-    name: ModalRoutes.DappSignatureModal,
-    component: DappSignatureStack,
   },
   {
     name: ModalRoutes.Collectibles,
@@ -220,47 +138,37 @@ const modalStackScreenList = [
     name: ModalRoutes.Swap,
     component: SwapModal,
   },
+  {
+    name: ModalRoutes.UpdateFeature,
+    component: UpdateFeatureModal,
+  },
+  {
+    name: ModalRoutes.FiatPay,
+    component: BuyModal,
+  },
 ];
-
-// ModalTypes will be delete later, don't update it
-export type ModalTypes = {
-  [CreateAccountModalRoutes.CreateAccountForm]: NavigatorScreenParams<CreateAccountRoutesParams>;
-  [ModalNavigatorRoutes.ReceiveTokenNavigator]: NavigatorScreenParams<ReceiveTokenRoutesParams>;
-  [ModalNavigatorRoutes.SendNavigator]: NavigatorScreenParams<SendRoutesParams>;
-  [TransactionDetailModalRoutes.TransactionDetailModal]: NavigatorScreenParams<TransactionDetailRoutesParams>;
-  [ImportAccountModalRoutes.ImportAccountModal]: NavigatorScreenParams<ImportAccountRoutesParams>;
-  [WatchedAccountModalRoutes.WatchedAccountModal]: NavigatorScreenParams<WatchedAccountRoutesParams>;
-  [CollectiblesModalRoutes.CollectionModal]: NavigatorScreenParams<CollectiblesRoutesParams>;
-  [PasswordRoutes.PasswordRoutes]: NavigatorScreenParams<PasswordRoutesParams>;
-  [SubmitRequestRoutes.SubmitRequestModal]: NavigatorScreenParams<SubmitRequestModalRoutesParams>;
-  [HistoryRequestRoutes.HistoryRequestModal]: NavigatorScreenParams<HistoryRequestModalRoutesParams>;
-  [CreateWalletModalRoutes.CreateWalletModal]: NavigatorScreenParams<CreateWalletRoutesParams>;
-  [BackupWalletModalRoutes.BackupWalletModal]: NavigatorScreenParams<BackupWalletRoutesParams>;
-  [ManagerWalletModalRoutes.ManagerWalletModal]: NavigatorScreenParams<ManagerWalletRoutesParams>;
-  [ManagerAccountModalRoutes.ManagerAccountModal]: NavigatorScreenParams<ManagerAccountRoutesParams>;
-  [DappApproveModalRoutes.ApproveModal]: NavigatorScreenParams<DappApproveRoutesParams>;
-  [DappConnectionModalRoutes.ConnectionModal]: NavigatorScreenParams<DappConnectionRoutesParams>;
-  [DappMulticallModalRoutes.MulticallModal]: NavigatorScreenParams<DappMulticallRoutesParams>;
-  [DappSendModalRoutes.SendConfirmModal]: NavigatorScreenParams<DappSendRoutesParams>;
-  [DappSignatureModalRoutes.SignatureModal]: NavigatorScreenParams<DappSignatureRoutesParams>;
-};
 
 const ModalStack = createStackNavigator<ModalRoutesParams>();
 
 const ModalStackNavigator = () => (
-  <ModalStack.Navigator
-    screenOptions={{
-      headerShown: false,
-    }}
-  >
-    {modalStackScreenList.map((modal) => (
-      <ModalStack.Screen
-        key={modal.name}
-        name={modal.name}
-        component={modal.component}
-      />
-    ))}
-  </ModalStack.Navigator>
+  <>
+    <ModalStack.Navigator
+      screenOptions={{
+        headerShown: false,
+      }}
+    >
+      {modalStackScreenList.map((modal) => (
+        <ModalStack.Screen
+          key={modal.name}
+          name={modal.name}
+          component={modal.component}
+        />
+      ))}
+    </ModalStack.Navigator>
+    {/* Native Modal must register another for root container */}
+    {platformEnv.isNativeIOS && <Toast bottomOffset={60} />}
+    {platformEnv.isNativeIOS && <DialogManager.Holder />}
+  </>
 );
 
 export default memo(ModalStackNavigator);

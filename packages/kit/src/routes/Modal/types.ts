@@ -5,16 +5,10 @@ export type { ReceiveTokenRoutesParams } from './ReceiveToken';
 export type { SubmitRequestModalRoutesParams } from './SubmitRequest';
 export type { HistoryRequestModalRoutesParams } from './HistoryRequest';
 export type { TransactionDetailRoutesParams } from './TransactionDetail';
-export type {
-  OnekeyLiteResetRoutesParams,
-  OnekeyLiteChangePinRoutesParams,
-} from '@onekeyhq/kit/src/views/Hardware/OnekeyLite/routes';
-export type { SendRoutesParams } from './Send';
-export type { DappApproveRoutesParams } from './DappApprove';
-export type { DappSendRoutesParams } from './DappSend';
-export type { DappMulticallRoutesParams } from './DappMulticall';
-export type { DappSignatureRoutesParams } from './DappSignature';
-export type { DappConnectionRoutesParams } from './DappConnection';
+export type { OnekeyLiteChangePinRoutesParams } from './HardwareOnekeyLiteChangePin';
+export type { OnekeyLiteResetRoutesParams } from './HardwareOnekeyLiteReset';
+export type { SendRoutesParams } from '../../views/Send/types';
+export type { DappConnectionRoutesParams } from '../../views/DappModals/types';
 export type { PasswordRoutesParams } from './Password';
 export type { ManageTokenRoutesParams } from './ManageToken';
 export type { CollectiblesRoutesParams } from './Collectibles';
@@ -27,3 +21,6 @@ export type { ManageNetworkRoutesParams } from './ManageNetwork';
 export type { OnekeyHardwareRoutesParams } from './HardwareOnekey';
 export type { DiscoverRoutesParams } from './Discover';
 export type { SwapRoutesParams } from './Swap';
+export type { ScanQrcodeRoutesParams } from './ScanQrcode';
+export type { UpdateFeatureRoutesParams } from './UpdateFeature';
+export type { FiatPayModalRoutesParams } from './FiatPay';

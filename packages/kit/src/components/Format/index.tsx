@@ -3,9 +3,13 @@ import React, { FC, useMemo } from 'react';
 
 import BigNumber from 'bignumber.js';
 import { isNil } from 'lodash';
-import { Text } from 'react-native';
 
-import { useAppSelector, useSettings } from '@onekeyhq/kit/src/hooks/redux';
+import { Text } from '@onekeyhq/components';
+import {
+  useActiveWalletAccount,
+  useAppSelector,
+  useSettings,
+} from '@onekeyhq/kit/src/hooks/redux';
 
 import { useManageTokens } from '../../hooks';
 import { Token } from '../../store/typings';
@@ -13,6 +17,8 @@ import { Token } from '../../store/typings';
 export type FormatOptions = {
   /** 向左偏移的位数，用于 decimal 的处理 */
   unit?: number;
+  /** 单位显示最大位数 */
+  unitMaxLength?: number;
   /** 保留小数位数 */
   fixed?: number;
   /** 是否完整显示，为 false 时抹零 */
@@ -80,10 +86,19 @@ export function formatBalanceDisplay(
   formatOptions?: FormatOptions,
 ) {
   const { unit, fixed, fullPrecision } = formatOptions || {};
+
+  let newUnit = suffix ? suffix.toUpperCase().trim() : undefined;
+
+  // Example: a data error causes the unit to be too long.
+  // If it's too long, just take the first 11 characters.
+  if (newUnit && newUnit.length > (formatOptions?.unitMaxLength ?? 20)) {
+    newUnit = `${newUnit.slice(0, formatOptions?.unitMaxLength ?? 11)}...`;
+  }
+
   if (isNil(balance)) {
     return {
       amount: undefined,
-      unit: suffix ? suffix.toUpperCase().trim() : undefined,
+      unit: newUnit,
     };
   }
   const amount = formatNumber(balance, {
@@ -94,7 +109,7 @@ export function formatBalanceDisplay(
 
   return {
     amount: amount || '0',
-    unit: suffix ? suffix.toUpperCase().trim() : undefined,
+    unit: newUnit,
   };
 }
 
@@ -126,8 +141,8 @@ export function useFormatAmount() {
 
       return numbers.reduce((memo, curr) => {
         if (curr === undefined || memo === undefined) return memo;
-        const memoBN = new BigNumber(memo);
-        const currBN = new BigNumber(curr);
+        const memoBN = new BigNumber(memo ?? '0');
+        const currBN = new BigNumber(curr ?? '0');
         return memoBN.multipliedBy(currBN);
       }, fiatBN);
     }, [fiat, numbers]);
@@ -165,11 +180,11 @@ export const FormatCurrency: FC<{
   const child = useMemo(
     () => (
       <>
-        {amount.amount}
+        {numbers.length ? amount.amount : '--'}
         &nbsp;{amount.unit}
       </>
     ),
-    [amount],
+    [amount.amount, amount.unit, numbers.length],
   );
 
   if (render) {
@@ -191,10 +206,13 @@ export const FormatCurrencyToken: FC<{
   const { prices } = useManageTokens();
   const priceKey =
     token && token.tokenIdOnNetwork ? token.tokenIdOnNetwork : 'main';
-
+  const priceValue = prices?.[priceKey];
+  const priceUndefined = priceValue === undefined;
   return (
     <FormatCurrency
-      numbers={[prices?.[priceKey], value, !value ? undefined : 1]}
+      numbers={
+        priceUndefined ? [] : [priceValue, value, !value ? undefined : 1]
+      }
       render={render}
       formatOptions={formatOptions}
       as={as}
@@ -246,3 +264,36 @@ export const FormatBalance: FC<{
 
   return <Component>{child}</Component>;
 };
+
+export function FormatBalanceToken({
+  token,
+  render,
+}: {
+  render?: (c: JSX.Element) => JSX.Element;
+  token?: Token | null;
+}) {
+  const { balances } = useManageTokens();
+  const isNativeToken = !token?.tokenIdOnNetwork;
+  const { network } = useActiveWalletAccount();
+  const decimal = isNativeToken
+    ? network?.nativeDisplayDecimals
+    : network?.tokenDisplayDecimals;
+
+  return (
+    <FormatBalance
+      balance={balances[token?.tokenIdOnNetwork || 'main']}
+      suffix={token?.symbol}
+      formatOptions={{
+        fixed: decimal ?? 4,
+      }}
+      render={
+        render ??
+        ((ele) => (
+          <Text typography={{ sm: 'Body1Strong', md: 'Body2Strong' }}>
+            {ele}
+          </Text>
+        ))
+      }
+    />
+  );
+}

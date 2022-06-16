@@ -1,17 +1,28 @@
-import React, { ComponentProps, ReactElement, ReactNode } from 'react';
+import React, {
+  ComponentProps,
+  ReactElement,
+  ReactNode,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from 'react';
 
-import { Input as BaseInput, Pressable, Stack } from 'native-base';
+import { Input as BaseInput, Stack } from 'native-base';
 import { Platform } from 'react-native';
+
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
 import Box from '../Box';
 import Divider from '../Divider';
 import Icon, { ICON_NAMES } from '../Icon';
+import Pressable from '../Pressable';
 import { useIsVerticalLayout } from '../Provider/hooks';
 import { Text, getTypographyStyleProps } from '../Typography';
 
 import type { TypographyStyle } from '../Typography';
 
 type Props = {
+  autoFocus?: boolean;
   isDisabled?: boolean;
   leftText?: string;
   rightText?: string;
@@ -20,7 +31,7 @@ type Props = {
   rightIconName?: ICON_NAMES;
   rightCustomElement?: ReactNode;
   rightSecondaryIconName?: ICON_NAMES;
-  size?: string;
+  size?: 'xl' | 'default' | string | undefined;
   textSize?: TypographyStyle;
   onPressLeftText?: () => void;
   onPressRightText?: () => void;
@@ -36,6 +47,7 @@ const Input = React.forwardRef<
 >(
   (
     {
+      autoFocus,
       isDisabled,
       leftText,
       rightText,
@@ -56,6 +68,33 @@ const Input = React.forwardRef<
     },
     ref,
   ) => {
+    const inputRef = useRef<typeof BaseInput>(null);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    useImperativeHandle(ref, () => inputRef.current!);
+    const shouldFocus = autoFocus && platformEnv.isRuntimeBrowser;
+    useEffect(() => {
+      // node_modules/react-native-web/dist/exports/TextInput/index.js
+      //    supportedProps.autoFocus = supportedProps.autoFocus && 'autofocus';
+      //    console.log('render TextInput', component, supportedProps);
+
+      if (shouldFocus) {
+        // ** focus immediately in Modal cause modal slow animation
+        // @ts-ignore
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        // inputRef.current?.focus?.();
+        //
+        const timer = setTimeout(() => {
+          // @ts-ignore
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+          inputRef.current?.focus?.();
+        }, 400);
+
+        return () => {
+          clearTimeout(timer);
+        };
+      }
+    }, [shouldFocus]);
+
     const leftElements: JSX.Element[] = [];
     const rightElements: JSX.Element[] = [];
     let pl = '3';
@@ -111,7 +150,13 @@ const Input = React.forwardRef<
     }
     if (rightIconName) {
       rightElements.push(
-        <Pressable onPress={onPressRightIcon} key="rightIconName">
+        <Pressable
+          onPress={onPressRightIcon}
+          key="rightIconName"
+          pt={1}
+          pb={1}
+          pl={2}
+        >
           <Icon
             size={20}
             name={rightIconName}
@@ -188,12 +233,13 @@ const Input = React.forwardRef<
     }
     return (
       <BaseInput
-        ref={ref}
+        ref={inputRef}
         selectionColor="text-default"
         isDisabled={isDisabled}
         InputLeftElement={inputLeftElement}
         InputRightElement={inputRightElement}
         w="80"
+        minW="0"
         h={size === 'xl' ? '50px' : { base: '42px', md: 'auto' }}
         borderColor="border-default"
         bg="action-secondary-default"
@@ -202,13 +248,19 @@ const Input = React.forwardRef<
         py="2"
         pl={pl}
         pr={pr}
-        autoCompleteType="off"
+        // autoCompleteType="off"
         _disabled={{
           bg: 'action-secondary-disabled',
           borderColor: 'border-disabled',
           cursor: ['ios', 'android'].includes(Platform.OS)
             ? undefined
             : 'not-allowed',
+        }}
+        _ios={{
+          selectionColor: 'interactive-default',
+        }}
+        _android={{
+          selectionColor: 'interactive-default',
         }}
         _hover={{
           bg: 'action-secondary-default', // remove this will use the background color from default theme of NativeBase
@@ -217,6 +269,9 @@ const Input = React.forwardRef<
         _focus={{
           bg: 'action-secondary-default',
           borderColor: 'focused-default',
+          _hover: {
+            borderColor: 'focused-default',
+          },
         }}
         _invalid={{ borderColor: 'border-critical-default' }}
         placeholderTextColor={isDisabled ? 'text-disabled' : 'text-subdued'}
@@ -224,6 +279,8 @@ const Input = React.forwardRef<
         fontWeight={textProps.fontWeight}
         fontFamily={textProps.fontFamily}
         {...props}
+        // WEB autofocus in Modal cause modal slow animation, and background jump
+        autoFocus={platformEnv.isRuntimeBrowser ? false : autoFocus}
       />
     );
   },

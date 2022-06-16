@@ -1,14 +1,15 @@
-import { EVMDecodedTxType } from '../vaults/impl/evm/decoder/decoder';
-
 import type {
   EVMDecodedItemERC20Approve,
   EVMDecodedItemERC20Transfer,
+  EVMDecodedItemInternalSwap,
+  EVMDecodedTxType,
 } from '../vaults/impl/evm/decoder/decoder';
 
 enum TxStatus {
   Pending = 'Pending',
   Confirmed = 'Confirmed',
   Failed = 'Failed',
+  Dropped = 'Dropped',
 }
 
 enum EVMTxFromType {
@@ -157,7 +158,16 @@ type Transaction = {
 
   tokenEvent: Array<Erc20TransferEvent>;
   source: 'local' | 'covalent';
-  info: EVMDecodedItemERC20Transfer | EVMDecodedItemERC20Approve | null;
+  info:
+    | EVMDecodedItemERC20Transfer
+    | EVMDecodedItemERC20Approve
+    | EVMDecodedItemInternalSwap
+    | null;
+  rawTx?: string;
+
+  chainId: number;
+  logEvents: Array<LogEvent>;
+  transfers: Array<Transfer>;
 };
 
 type Erc20TransferEvent = {
@@ -249,4 +259,4 @@ export type {
   NftMetadata,
   BlockTransactionWithLogEvents,
 };
-export { TxStatus, EVMDecodedTxType, EVMTxFromType };
+export { TxStatus, EVMTxFromType };

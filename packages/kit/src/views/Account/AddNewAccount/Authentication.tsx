@@ -4,11 +4,15 @@ import React, { FC, useEffect } from 'react';
 import { RouteProp, useRoute } from '@react-navigation/native';
 
 import { Center, Modal, Spinner } from '@onekeyhq/components';
-import Protected from '@onekeyhq/kit/src/components/Protected';
+import Protected, {
+  ValidationFields,
+} from '@onekeyhq/kit/src/components/Protected';
 import {
   CreateAccountModalRoutes,
   CreateAccountRoutesParams,
 } from '@onekeyhq/kit/src/routes';
+
+import { useNavigation } from '../../../hooks';
 
 export type EnableLocalAuthenticationProps = {
   password: string;
@@ -38,10 +42,14 @@ const HDAccountAuthenticationDone: FC<EnableLocalAuthenticationProps> = ({
 
 export const HDAccountAuthentication: FC = () => {
   const route = useRoute<RouteProps>();
-  const { onDone } = route.params;
+  const navigation = useNavigation();
+  const { onDone, walletId } = route.params;
+  useEffect(() => {
+    navigation.setOptions({ gestureEnabled: false });
+  }, []);
   return (
-    <Modal footer={null}>
-      <Protected>
+    <Modal footer={null} headerShown={false}>
+      <Protected walletId={walletId} field={ValidationFields.Account}>
         {(password) => (
           <HDAccountAuthenticationDone
             password={password}

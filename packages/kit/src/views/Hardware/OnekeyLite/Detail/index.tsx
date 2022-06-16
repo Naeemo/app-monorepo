@@ -10,13 +10,16 @@ import {
   Dialog,
   Icon,
   Input,
+  Pressable,
   Select,
+  Text,
   useLocale,
 } from '@onekeyhq/components';
 import { OnCloseCallback } from '@onekeyhq/components/src/Dialog/components/FooterButton';
 import { SelectItem } from '@onekeyhq/components/src/Select';
 import { Wallet } from '@onekeyhq/engine/src/types/wallet';
 import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
+import WalletAvatar from '@onekeyhq/kit/src/components/Header/WalletAvatar';
 import WebView from '@onekeyhq/kit/src/components/WebView';
 import { useActiveWalletAccount } from '@onekeyhq/kit/src/hooks/redux';
 import {
@@ -102,11 +105,11 @@ const OnekeyLiteDetail: React.FC = () => {
     });
 
     navigation.setOptions({
-      title: 'OneKey Lite',
+      title: intl.formatMessage({ id: 'app__hardware_name_onekey_lite' }),
       headerRight: () => (
         <Select
           dropdownPosition="right"
-          title="Onekey Lite"
+          title={intl.formatMessage({ id: 'app__hardware_name_onekey_lite' })}
           onChange={(v) => {
             if (currentOptionType !== v) setCurrentOptionType(v);
           }}
@@ -130,35 +133,11 @@ const OnekeyLiteDetail: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intl, navigation]);
 
-  const startRestoreModal = (inputPwd: string, callBack: () => void) => {
-    navigation.navigate(RootRoutes.Modal, {
-      screen: ModalRoutes.CreateWallet,
-      params: {
-        screen: CreateWalletModalRoutes.OnekeyLiteRestoreModal,
-        params: {
-          pwd: inputPwd,
-          onRetry: () => {
-            callBack?.();
-          },
-        },
-      },
-    });
-  };
-
   const startRestorePinVerifyModal = () => {
     navigation.navigate(RootRoutes.Modal, {
       screen: ModalRoutes.CreateWallet,
       params: {
-        screen: CreateWalletModalRoutes.OnekeyLitePinCodeVerifyModal,
-        params: {
-          callBack: (inputPwd) => {
-            startRestoreModal(inputPwd, () => {
-              console.log('restartRestorePinVerifyModal');
-              startRestorePinVerifyModal();
-            });
-            return true;
-          },
-        },
+        screen: CreateWalletModalRoutes.OnekeyLiteRestorePinCodeVerifyModal,
       },
     });
   };
@@ -269,9 +248,12 @@ const OnekeyLiteDetail: React.FC = () => {
           contentProps={{
             iconType: 'danger',
             title: intl.formatMessage({ id: 'action__reset_onekey_lite' }),
-            content: intl.formatMessage({
-              id: 'modal__reset_onekey_lite_desc',
-            }),
+            content: intl.formatMessage(
+              {
+                id: 'modal__reset_onekey_lite_desc',
+              },
+              { 0: 'RESET' },
+            ),
           }}
           footerButtonProps={{
             onPrimaryActionPress: ({ onClose }: OnCloseCallback) => {
@@ -295,14 +277,13 @@ const OnekeyLiteDetail: React.FC = () => {
       <Select
         visible={selectBackupWalletVisible}
         onVisibleChange={setSelectBackupWalletVisible}
-        onChange={(walletId) => {
+        onChange={(walletItem) => {
           navigation.navigate(RootRoutes.Modal, {
             screen: ModalRoutes.BackupWallet,
             params: {
-              screen: BackupWalletModalRoutes.BackupWalletAuthorityVerifyModal,
+              screen: BackupWalletModalRoutes.BackupWalletLiteModal,
               params: {
-                walletId,
-                backupType: 'OnekeyLite',
+                walletId: walletItem.id,
               },
             },
           });
@@ -320,11 +301,30 @@ const OnekeyLiteDetail: React.FC = () => {
             { id: 'form__str_accounts' },
             { count: _wallet.accounts.length.toString() },
           ),
-          value: _wallet.id,
-          tokenProps: {
-            address: _wallet.id,
-          },
+          value: _wallet,
         }))}
+        renderItem={(walletItem, isActive, onChange) => (
+          <Pressable
+            onPress={() => onChange?.(walletItem.value, walletItem)}
+            flexDirection="row"
+            alignItems="center"
+            height="68px"
+            paddingLeft="18px"
+          >
+            <WalletAvatar
+              walletImage={walletItem.value.type}
+              avatar={walletItem.value.avatar}
+              size="sm"
+              circular
+            />
+            <Box flexDirection="column" ml="12px">
+              <Text typography="Body1Strong">{walletItem.label}</Text>
+              <Text typography="Body2" color="text-subdued">
+                {walletItem.description}
+              </Text>
+            </Box>
+          </Pressable>
+        )}
         renderTrigger={() => <Box />}
       />
     </>

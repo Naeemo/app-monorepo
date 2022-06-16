@@ -10,7 +10,14 @@ import uuid from 'react-native-uuid';
 
 // import { ETHMessageTypes } from '@onekeyhq/engine/src/types/message';
 import { IMPL_EVM } from '@onekeyhq/engine/src/constants';
+import { fixAddressCase } from '@onekeyhq/engine/src/engineUtils';
+import { ETHMessageTypes } from '@onekeyhq/engine/src/types/message';
 import { EvmExtraInfo } from '@onekeyhq/engine/src/types/network';
+import type VaultEvm from '@onekeyhq/engine/src/vaults/impl/evm/Vault';
+import {
+  IEncodedTxEvm,
+  IUnsignedMessageEvm,
+} from '@onekeyhq/engine/src/vaults/impl/evm/Vault';
 import debugLogger from '@onekeyhq/shared/src/logger/debugLogger';
 import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
@@ -51,6 +58,33 @@ export interface Transaction {
   maxPriorityFeePerGas?: string;
   estimatedBaseFee?: string;
 }
+
+export type WatchAssetParameters = {
+  type: string; // The asset's interface, e.g. 'ERC20'
+  options: {
+    address: string; // The hexadecimal Ethereum address of the token contract
+    symbol?: string; // A ticker symbol or shorthand, up to 5 alphanumerical characters
+    decimals?: number; // The number of asset decimals
+    image?: string; // A string url of the token logo
+  };
+};
+
+export type AddEthereumChainParameter = {
+  chainId: string;
+  blockExplorerUrls?: string[];
+  chainName?: string;
+  iconUrls?: string[];
+  nativeCurrency?: {
+    name: string;
+    symbol: string;
+    decimals: number;
+  };
+  rpcUrls?: string[];
+};
+
+export type SwitchEthereumChainParameter = {
+  chainId: string;
+};
 
 @backgroundClass()
 class ProviderApiEthereum extends ProviderApiBase {
@@ -100,16 +134,12 @@ class ProviderApiEthereum extends ProviderApiBase {
     request: IJsBridgeMessagePayload,
     transaction: Transaction,
   ) {
-    if (platformEnv.isExtension) {
-      // return extUtils.openApprovalWindow();
-    }
-
     debugLogger.ethereum('eth_sendTransaction', request, transaction);
     // Parse transaction
     // const { from, to, value, gasLimit, gasPrice, data, nonce, type } =
     //   transaction;
 
-    const result = await this.backgroundApi.serviceDapp?.openSendConfirmModal(
+    const result = await this.backgroundApi.serviceDapp?.openApprovalModal(
       request,
       {
         encodedTx: transaction,
@@ -124,21 +154,6 @@ class ProviderApiEthereum extends ProviderApiBase {
     );
 
     return result;
-    // const isContractAddress = false;
-    // if (isContractAddress) {
-    //   const isApproval = false;
-    //
-    //   if (isApproval) {
-    //     // Approval modal
-    //     return this.backgroundApi.serviceDapp?.openApprovalModal(request);
-    //   }
-    //
-    //   // Contract modal
-    //   return this.backgroundApi.serviceDapp?.openMulticallModal(request);
-    // }
-    //
-    // // Send transaction confirm modal
-    // return this.backgroundApi.serviceDapp?.openSendConfirmModal(request);
   }
 
   /**
@@ -157,12 +172,18 @@ class ProviderApiEthereum extends ProviderApiBase {
    * });
    */
   @permissionRequired()
-  wallet_watchAsset() {
-    return true;
-  }
-
-  async wallet_getDebugLoggerSettings() {
-    const result = (await debugLogger.debug?.load()) || '';
+  async wallet_watchAsset(
+    request: IJsBridgeMessagePayload,
+    params: WatchAssetParameters,
+  ) {
+    const type = params.type ?? '';
+    if (type !== 'ERC20') {
+      throw new Error(`Asset of type '${type}' not supported`);
+    }
+    const result = await this.backgroundApi.serviceDapp?.openAddTokenModal(
+      request,
+      params,
+    );
     return result;
   }
 
@@ -187,9 +208,7 @@ class ProviderApiEthereum extends ProviderApiBase {
     };
 
     const permissionRes =
-      await this.backgroundApi.serviceDapp?.openConnectionApprovalModal(
-        request,
-      );
+      await this.backgroundApi.serviceDapp?.openConnectionModal(request);
 
     const result: Permission[] = Object.keys(permissions).map(
       (permissionName) => {
@@ -233,7 +252,7 @@ class ProviderApiEthereum extends ProviderApiBase {
       return accounts;
     }
 
-    await this.backgroundApi.serviceDapp.openConnectionApprovalModal(request);
+    await this.backgroundApi.serviceDapp.openConnectionModal(request);
     return this.eth_accounts(request);
 
     // TODO show approval confirmation, skip in whitelist domain
@@ -276,12 +295,128 @@ class ProviderApiEthereum extends ProviderApiBase {
     );
   }
 
+  async showSignMessageModal(
+    request: IJsBridgeMessagePayload,
+    unsignedMessage: IUnsignedMessageEvm,
+  ) {
+    const result = await this.backgroundApi.serviceDapp?.openApprovalModal(
+      request,
+      {
+        unsignedMessage,
+      },
+    );
+    return result;
+  }
+
+  eth_subscribe() {
+    throw web3Errors.rpc.methodNotSupported();
+  }
+
+  eth_unsubscribe() {
+    throw web3Errors.rpc.methodNotSupported();
+  }
+
   /** Sign unapproved message
    * Open @type {import("@onekeyhq/kit/src/views/DappModals/Signature.tsx").default} modal
    * arg req: IJsBridgeMessagePayload, ...[msg, from, passphrase]
    */
-  eth_sign() {
-    throw web3Errors.rpc.methodNotSupported();
+  eth_sign(req: IJsBridgeMessagePayload, ...messages: any[]) {
+    console.log('eth_sign', messages, req);
+    return this.showSignMessageModal(req, {
+      type: ETHMessageTypes.ETH_SIGN,
+      message: messages[1],
+      payload: messages,
+    });
+  }
+
+  async personal_sign(req: IJsBridgeMessagePayload, ...messages: any[]) {
+    let message = messages[0] as string;
+
+    const accounts = await this.eth_accounts(req);
+    // FIX:  dydx use second param as message
+    if (accounts && accounts.length) {
+      const a = fixAddressCase({
+        impl: IMPL_EVM,
+        address: messages[0] || '',
+      });
+      const b = fixAddressCase({
+        impl: IMPL_EVM,
+        address: accounts[0] || '',
+      });
+      if (a && a === b && messages[1]) {
+        message = messages[1] as string;
+      }
+    }
+
+    console.log('personal_sign', message, messages, req);
+    return this.showSignMessageModal(req, {
+      type: ETHMessageTypes.PERSONAL_SIGN,
+      message,
+      payload: messages,
+    });
+  }
+
+  async personal_ecRecover(
+    req: IJsBridgeMessagePayload,
+    ...messages: string[]
+  ) {
+    console.log('personal_ecRecover: ', req, messages);
+    const [message, signature] = messages;
+    if (
+      typeof message === 'string' &&
+      typeof signature === 'string' &&
+      // Signature is 65-bytes in length, length of its hexstring is 132.
+      signature.length === 132
+    ) {
+      const { networkId } = getActiveWalletAccount();
+      // Not interacting with user's credential, only a static method, so any
+      // vault would do.
+      const evmWatchVault =
+        await this.backgroundApi.engine.vaultFactory.getChainOnlyVault(
+          networkId,
+        );
+      const result = await (evmWatchVault as VaultEvm).personalECRecover(
+        message,
+        signature,
+      );
+      console.log('personal_ecRecover: ', req, messages, result);
+      return result;
+    }
+    throw web3Errors.rpc.invalidParams(
+      'personal_ecRecover requires a message and a 65 bytes signature.',
+    );
+  }
+
+  eth_signTypedData(req: IJsBridgeMessagePayload, ...messages: any[]) {
+    console.log('eth_signTypedData', messages, req);
+    return this.showSignMessageModal(req, {
+      type: ETHMessageTypes.TYPED_DATA_V1,
+      message: JSON.stringify(messages[0]),
+      payload: messages,
+    });
+  }
+
+  eth_signTypedData_v1(req: IJsBridgeMessagePayload, ...messages: any[]) {
+    // @ts-ignore
+    return this.eth_signTypedData(req, ...messages);
+  }
+
+  eth_signTypedData_v3(req: IJsBridgeMessagePayload, ...messages: any[]) {
+    console.log('eth_signTypedData_v3', messages, req);
+    return this.showSignMessageModal(req, {
+      type: ETHMessageTypes.TYPED_DATA_V3,
+      message: messages[1],
+      payload: messages,
+    });
+  }
+
+  eth_signTypedData_v4(req: IJsBridgeMessagePayload, ...messages: any[]) {
+    console.log('eth_signTypedData_v4', messages, req);
+    return this.showSignMessageModal(req, {
+      type: ETHMessageTypes.TYPED_DATA_V4,
+      message: messages[1],
+      payload: messages,
+    });
   }
 
   async eth_chainId() {
@@ -296,20 +431,17 @@ class ProviderApiEthereum extends ProviderApiBase {
 
   // TODO @publicMethod()
   async metamask_getProviderState(request: IJsBridgeMessagePayload) {
-    // pass debugLoggerSettings to dapp injected provider
-    const debugLoggerSettings = (await debugLogger?.debug?.load?.()) ?? '';
     return {
       accounts: await this.eth_accounts(request),
       chainId: await this.eth_chainId(),
       networkVersion: await this.net_version(),
       isUnlocked: await this._getCurrentUnlockState(),
-      debugLoggerSettings,
     };
   }
 
   // get and save Dapp site icon & title
   metamask_sendDomainMetadata() {
-    // TODO save to DB
+    // TODO
     return {};
   }
 
@@ -334,30 +466,65 @@ class ProviderApiEthereum extends ProviderApiBase {
       rpcUrls,
     },
    */
-  wallet_addEthereumChain() {
-    // TODO
-    return false;
+  async wallet_addEthereumChain(
+    request: IJsBridgeMessagePayload,
+    params: AddEthereumChainParameter,
+  ) {
+    const networks = await this.backgroundApi.serviceNetwork.fetchNetworks();
+    const networkId = `evm--${parseInt(params.chainId)}`;
+    const included = networks.some((network) => network.id === networkId);
+    if (included) {
+      return this.wallet_switchEthereumChain(request, {
+        chainId: params.chainId,
+      });
+    }
+
+    const result = await this.backgroundApi.serviceDapp?.openAddNetworkModal(
+      request,
+      params,
+    );
+    return result;
   }
 
   /**
    * Add switch to a chain, we also need a request modal UI
    * req: IJsBridgeMessagePayload, { chainId }
    */
-  wallet_switchEthereumChain() {
-    // TODO
-    return false;
+  async wallet_switchEthereumChain(
+    request: IJsBridgeMessagePayload,
+    params: SwitchEthereumChainParameter,
+  ) {
+    const networks = await this.backgroundApi.serviceNetwork.fetchNetworks();
+    const networkId = `evm--${parseInt(params.chainId)}`;
+    const included = networks.some((network) => network.id === networkId);
+    if (!included) {
+      // throw new Error(
+      //   `Unrecognized chain ID ${params.chainId}. Try adding the chain using wallet_addEthereumChain first.`,
+      // );
+      return false;
+    }
+
+    const result = await this.backgroundApi.serviceDapp?.openSwitchNetworkModal(
+      request,
+      params,
+    );
+    return result;
   }
 
   // ----------------------------------------------
 
   public async rpcCall(request: IJsonRpcRequest): Promise<any> {
     const { networkId } = getActiveWalletAccount();
+    debugLogger.ethereum('BgApi rpcCall:', request, { networkId });
     // TODO error if networkId empty, or networkImpl not EVM
-    const result = await this.backgroundApi.engine.proxyRPCCall(
+    const result = await this.backgroundApi.engine.proxyJsonRPCCall(
       networkId,
       request,
     );
-    debugLogger.ethereum('BgApi rpcCall:', request, { networkId, result });
+    debugLogger.ethereum('BgApi rpcCall RESULT:', request, {
+      networkId,
+      result,
+    });
     return result;
   }
 
@@ -391,55 +558,6 @@ class ProviderApiEthereum extends ProviderApiBase {
   // TODO metamask_unlockStateChanged
 
   // TODO throwMethodNotFound
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  personal_sign(message: string): Promise<string> {
-    throw web3Errors.rpc.methodNotFound();
-  }
-
-  // ----------------------------------------------
-
-  /*
-  private async signMessage(
-    type: ETHMessageTypes,
-    message: string,
-  ): Promise<string> {
-    const networkId = `${IMPL_EVM}--${this._getCurrentChainId()}`;
-    const password = '';
-    const accountId = '';
-    const signatures = await engine.signMessage(
-      password,
-      networkId,
-      accountId,
-      [{ type, message }],
-    );
-    return signatures[0];
-  }
-
-  personal_sign(message: string): Promise<string> {
-    return this.signMessage(ETHMessageTypes.PERSONAL_SIGN, message);
-  }
-
-  eth_sign(message: string): Promise<string> {
-    return this.signMessage(ETHMessageTypes.ETH_SIGN, message);
-  }
-
-  eth_signTypedData(message: string): Promise<string> {
-    return this.signMessage(ETHMessageTypes.TYPED_DATA_V1, message);
-  }
-
-  eth_signTypedData_v1(message: string): Promise<string> {
-    return this.eth_signTypedData(message);
-  }
-
-  eth_signTypedData_v3(message: string): Promise<string> {
-    return this.signMessage(ETHMessageTypes.TYPED_DATA_V3, message);
-  }
-
-  eth_signTypedData_v4(message: string): Promise<string> {
-    return this.signMessage(ETHMessageTypes.TYPED_DATA_V4, message);
-  }
-  */
 }
 
 export default ProviderApiEthereum;

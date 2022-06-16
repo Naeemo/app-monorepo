@@ -20,10 +20,11 @@ import {
   Spinner,
   Typography,
   useForm,
+  useIsVerticalLayout,
+  useToast,
 } from '@onekeyhq/components';
 
 import backgroundApiProxy from '../../../background/instance/backgroundApiProxy';
-import { useToast } from '../../../hooks';
 import { ManageNetworkRoutes, ManageNetworkRoutesParams } from '../types';
 
 import { DiscardAlert } from './DiscardAlert';
@@ -59,9 +60,12 @@ function getColor(value: number) {
   return 'text-critical';
 }
 
-async function measure(url: string, impl = 'evm'): Promise<number> {
+async function measure(url: string, networkId = 'evm--1'): Promise<number> {
   const { responseTime } =
-    await backgroundApiProxy.serviceNetwork.getRPCEndpointStatus(url, impl);
+    await backgroundApiProxy.serviceNetwork.getRPCEndpointStatus(
+      url,
+      networkId,
+    );
   return responseTime;
 }
 
@@ -69,10 +73,11 @@ export const PresetNetwork: FC<PresetNetwokProps> = ({ route }) => {
   const { name, rpcURL, chainId, symbol, exploreUrl, id, impl } = route.params;
   const intl = useIntl();
   const [visible, setVisible] = useState(false);
-  const refData = useRef({ preventRemove: false });
+  const refData = useRef({ preventRemove: false, isResetting: false });
   const navigation = useNavigation<NavigationProps>();
   const toast = useToast();
   const [rpcUrls, setRpcUrls] = useState<string[]>([]);
+  const [defaultRpcURL, setDefaultRpcURL] = useState<string>(rpcURL ?? '');
   const [networkStatus, setNetworkStatus] = useState<Record<string, number>>(
     {},
   );
@@ -83,6 +88,7 @@ export const PresetNetwork: FC<PresetNetwokProps> = ({ route }) => {
       defaultValues: { name, rpcURL, chainId, symbol, exploreUrl, id },
     });
   const [resetOpened, setResetOpened] = useState(false);
+  const isSmallScreen = useIsVerticalLayout();
 
   const watchedRpcURL = watch('rpcURL');
 
@@ -91,9 +97,20 @@ export const PresetNetwork: FC<PresetNetwokProps> = ({ route }) => {
   }, []);
 
   useEffect(() => {
-    serviceNetwork.getPresetRpcEndpoints(id).then((urls: string[]) => {
-      setRpcUrls(urls);
-    });
+    serviceNetwork
+      .getPresetRpcEndpoints(id)
+      .then(
+        ({
+          urls,
+          defaultRpcURL: defaultURL,
+        }: {
+          urls: Array<string>;
+          defaultRpcURL: string;
+        }) => {
+          setRpcUrls(urls);
+          setDefaultRpcURL(defaultURL);
+        },
+      );
   }, [serviceNetwork, id]);
 
   const onSubmit = useCallback(
@@ -110,11 +127,14 @@ export const PresetNetwork: FC<PresetNetwokProps> = ({ route }) => {
 
   useEffect(() => {
     rpcUrls.forEach((url) => {
-      measure(url, impl).then((value) =>
-        setNetworkStatus((prev) => ({ ...prev, [url]: value })),
+      measure(url, id).then(
+        (value) => setNetworkStatus((prev) => ({ ...prev, [url]: value })),
+        (error) => {
+          console.error(error);
+        },
       );
     });
-  }, [rpcUrls, impl]);
+  }, [rpcUrls, id]);
 
   const options = useMemo<
     { value: string; label: string; trailing?: React.ReactNode }[]
@@ -135,15 +155,23 @@ export const PresetNetwork: FC<PresetNetwokProps> = ({ route }) => {
   );
 
   const onReset = useCallback(() => {
-    reset(route.params);
+    refData.current.isResetting = true;
+    reset({ ...route.params, rpcURL: defaultRpcURL });
     setResetOpened(false);
     toast.show({ title: intl.formatMessage({ id: 'msg__network_reset' }) });
     navigation.popToTop();
-  }, [route.params, toast, intl, reset, navigation]);
+  }, [route.params, toast, intl, reset, navigation, defaultRpcURL, refData]);
 
   const onBeforeRemove = useCallback(
     (e) => {
-      if (getValues('rpcURL') !== rpcURL && !refData.current.preventRemove) {
+      if (refData.current.isResetting && !refData.current.preventRemove) {
+        refData.current.isResetting = false;
+        // eslint-disable-next-line
+        e.preventDefault();
+      } else if (
+        getValues('rpcURL') !== rpcURL &&
+        !refData.current.preventRemove
+      ) {
         // eslint-disable-next-line
         e.preventDefault();
         setVisible(true);
@@ -189,7 +217,10 @@ export const PresetNetwork: FC<PresetNetwokProps> = ({ route }) => {
                   })}
                   control={control}
                 >
-                  <Form.Input isDisabled />
+                  <Form.Input
+                    isDisabled
+                    size={isSmallScreen ? 'xl' : 'default'}
+                  />
                 </Form.Item>
                 <Form.Item
                   name="rpcURL"
@@ -221,6 +252,7 @@ export const PresetNetwork: FC<PresetNetwokProps> = ({ route }) => {
                     options={options}
                     dropdownProps={{ width: '352px' }}
                     dropdownPosition="right"
+                    triggerSize={isSmallScreen ? 'xl' : 'default'}
                   />
                 </Form.Item>
                 {impl === 'evm' ? (
@@ -235,6 +267,7 @@ export const PresetNetwork: FC<PresetNetwokProps> = ({ route }) => {
                     <Form.Input
                       placeholder={intl.formatMessage({ id: 'form__chain_id' })}
                       isDisabled
+                      size={isSmallScreen ? 'xl' : 'default'}
                     />
                   </Form.Item>
                 ) : null}
@@ -254,7 +287,11 @@ export const PresetNetwork: FC<PresetNetwokProps> = ({ route }) => {
                   }
                   control={control}
                 >
-                  <Form.Input placeholder="ETH" isDisabled />
+                  <Form.Input
+                    placeholder="ETH"
+                    isDisabled
+                    size={isSmallScreen ? 'xl' : 'default'}
+                  />
                 </Form.Item>
                 <Form.Item
                   name="exploreUrl"
@@ -272,13 +309,16 @@ export const PresetNetwork: FC<PresetNetwokProps> = ({ route }) => {
                   }
                   control={control}
                 >
-                  <Form.Input isDisabled />
+                  <Form.Input
+                    isDisabled
+                    size={isSmallScreen ? 'xl' : 'default'}
+                  />
                 </Form.Item>
                 <Button
                   w="full"
-                  size="lg"
+                  size={isSmallScreen ? 'xl' : 'lg'}
                   onPress={onButtonPress}
-                  isDisabled={watchedRpcURL === rpcURL}
+                  isDisabled={watchedRpcURL === defaultRpcURL}
                 >
                   {intl.formatMessage({
                     id: 'action__reset',

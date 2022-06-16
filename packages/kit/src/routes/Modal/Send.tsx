@@ -1,26 +1,48 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import React from 'react';
 
 import { useIsVerticalLayout } from '@onekeyhq/components';
 import SendAuthentication from '@onekeyhq/kit/src/views/Send/Authentication';
-import Send from '@onekeyhq/kit/src/views/Send/Send';
-import SendConfirm from '@onekeyhq/kit/src/views/Send/SendConfirm';
+import { PreSendAddress } from '@onekeyhq/kit/src/views/Send/PreSendAddress';
+import { PreSendAmount } from '@onekeyhq/kit/src/views/Send/PreSendAmount';
+import { PreSendToken } from '@onekeyhq/kit/src/views/Send/PreSendToken';
+import SendConfirmModern from '@onekeyhq/kit/src/views/Send/SendConfirm';
 import { SendConfirmFromDapp } from '@onekeyhq/kit/src/views/Send/SendConfirmFromDapp';
+import SendConfirmLegacy from '@onekeyhq/kit/src/views/Send/SendConfirmLegacy';
 import SendEditFee from '@onekeyhq/kit/src/views/Send/SendEditFee';
+import SendLegacy from '@onekeyhq/kit/src/views/Send/SendLegacy';
 import {
   SendRoutes,
   SendRoutesParams,
 } from '@onekeyhq/kit/src/views/Send/types';
 
 import { TokenApproveAmountEdit } from '../../views/Send/confirmViews/TokenApproveAmountEdit';
+import SignMessageConfirm from '../../views/Send/SignMessageConfirm';
+import SwapPreiview from '../../views/Swap/Preview/index';
 
 import createStackNavigator from './createStackNavigator';
 
 const SendNavigator = createStackNavigator<SendRoutesParams>();
 
+// const SendConfirm = SendConfirmLegacy;
+const SendConfirm = SendConfirmModern;
+
 const modalRoutes = [
   {
-    name: SendRoutes.Send,
-    component: Send,
+    name: SendRoutes.PreSendToken,
+    component: PreSendToken,
+  },
+  {
+    name: SendRoutes.PreSendAddress,
+    component: PreSendAddress,
+  },
+  {
+    name: SendRoutes.PreSendAmount,
+    component: PreSendAmount,
+  },
+  {
+    name: SendRoutes.SendLegacy,
+    component: SendLegacy,
   },
   {
     name: SendRoutes.SendConfirm,
@@ -42,9 +64,18 @@ const modalRoutes = [
     name: SendRoutes.SendAuthentication,
     component: SendAuthentication,
   },
+  {
+    name: SendRoutes.SignMessageConfirm,
+    component: SignMessageConfirm,
+  },
+  {
+    name: SendRoutes.SwapPreview,
+    component: SwapPreiview,
+  },
 ];
 
 const TransactionStack = () => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isVerticalLayout = useIsVerticalLayout();
   return (
     <SendNavigator.Navigator

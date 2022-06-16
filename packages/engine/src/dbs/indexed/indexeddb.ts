@@ -3,8 +3,6 @@
 
 import { Buffer } from 'buffer';
 
-import { RevealableSeed } from '@onekeyfe/blockchain-libs/dist/secret';
-
 import {
   AccountAlreadyExists,
   NotImplemented,
@@ -40,11 +38,14 @@ import {
   Wallet,
 } from '../../types/wallet';
 import {
+  CreateHDWalletParams,
+  CreateHWWalletParams,
   DBAPI,
   DEFAULT_VERIFY_STRING,
   ExportedCredential,
   MAIN_CONTEXT,
   OneKeyContext,
+  SetWalletNameAndAvatarParams,
   StoredPrivateKeyCredential,
   StoredSeedCredential,
   checkPassword,
@@ -61,7 +62,7 @@ type TokenBinding = {
 require('fake-indexeddb/auto');
 
 const DB_NAME = 'OneKey';
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 
 const CONTEXT_STORE_NAME = 'context';
 const CREDENTIAL_STORE_NAME = 'credentials';
@@ -702,12 +703,82 @@ class IndexedDBApi implements DBAPI {
     return this.ready.then(
       (db) =>
         new Promise((resolve, _reject) => {
-          const request: IDBRequest = db
-            .transaction([WALLET_STORE_NAME])
-            .objectStore(WALLET_STORE_NAME)
-            .getAll();
+          let ret: Array<Wallet> = [];
+          const transaction = db.transaction(
+            [
+              CONTEXT_STORE_NAME,
+              CREDENTIAL_STORE_NAME,
+              WALLET_STORE_NAME,
+              ACCOUNT_STORE_NAME,
+              TOKEN_BINDING_STORE_NAME,
+            ],
+            'readwrite',
+          );
+          transaction.onerror = (_tevent) => {
+            console.error('Failed to cleanup pending wallets.');
+            resolve(ret);
+          };
+          transaction.oncomplete = (_tevent) => {
+            resolve(ret);
+          };
+
+          const request = transaction.objectStore(WALLET_STORE_NAME).getAll();
           request.onsuccess = (_event) => {
-            resolve(request.result as Array<Wallet>);
+            const getMainContextRequest = transaction
+              .objectStore(CONTEXT_STORE_NAME)
+              .get(MAIN_CONTEXT);
+            getMainContextRequest.onsuccess = (_cevent) => {
+              const context: OneKeyContext =
+                getMainContextRequest.result as OneKeyContext;
+              if (typeof context !== 'undefined') {
+                // Set the return value first
+                const pendingWallets = context.pendingWallets || [];
+                ret = (request.result as Array<Wallet>).filter(
+                  (wallet) => !pendingWallets.includes(wallet.id),
+                );
+
+                if (pendingWallets.length > 0) {
+                  context.pendingWallets = [];
+                  transaction.objectStore(CONTEXT_STORE_NAME).put(context);
+                }
+                // Then do the cleanup
+                const walletStore = transaction.objectStore(WALLET_STORE_NAME);
+                for (const walletId of pendingWallets) {
+                  const getWalletRequest = walletStore.get(walletId);
+                  getWalletRequest.onsuccess = (_wevent) => {
+                    const wallet = getWalletRequest.result as Wallet;
+                    if (typeof wallet !== 'undefined') {
+                      walletStore.delete(walletId);
+                      transaction
+                        .objectStore(CREDENTIAL_STORE_NAME)
+                        .delete(walletId);
+                      wallet.accounts.forEach((accountId) => {
+                        transaction
+                          .objectStore(ACCOUNT_STORE_NAME)
+                          .delete(accountId);
+                      });
+                      const openCursorRequest = transaction
+                        .objectStore(TOKEN_BINDING_STORE_NAME)
+                        .openCursor();
+                      openCursorRequest.onsuccess = (_cursorEvent) => {
+                        const cursor: IDBCursorWithValue =
+                          openCursorRequest.result as IDBCursorWithValue;
+                        if (cursor) {
+                          if (
+                            wallet.accounts.includes(
+                              (cursor.value as TokenBinding).accountId,
+                            )
+                          ) {
+                            cursor.delete();
+                          }
+                          cursor.continue();
+                        }
+                      };
+                    }
+                  };
+                }
+              }
+            };
           };
         }),
     );
@@ -732,12 +803,13 @@ class IndexedDBApi implements DBAPI {
     );
   }
 
-  createHDWallet(
-    password: string,
-    rs: RevealableSeed,
-    backuped: boolean,
-    name?: string,
-  ): Promise<Wallet> {
+  createHDWallet({
+    password,
+    rs,
+    backuped,
+    name,
+    avatar,
+  }: CreateHDWalletParams): Promise<Wallet> {
     let ret: Wallet;
     return this.ready.then(
       (db) =>
@@ -766,6 +838,7 @@ class IndexedDBApi implements DBAPI {
             ret = {
               id: walletId,
               name: name || `Wallet ${context.nextHD}`,
+              avatar,
               type: WALLET_TYPE_HD,
               backuped,
               accounts: [],
@@ -786,13 +859,17 @@ class IndexedDBApi implements DBAPI {
               ).toString('hex');
             }
             context.nextHD += 1;
+            context.pendingWallets = [
+              ...(context.pendingWallets || []),
+              walletId,
+            ];
             contextStore.put(context);
           };
         }),
     );
   }
 
-  addHWWallet(id: string, name: string): Promise<Wallet> {
+  addHWWallet({ id, name, avatar }: CreateHWWalletParams): Promise<Wallet> {
     let ret: Wallet;
     return this.ready.then(
       (db) =>
@@ -821,13 +898,16 @@ class IndexedDBApi implements DBAPI {
             const getWalletRequest = walletStore.get(walletId);
             getWalletRequest.onsuccess = (_wevent) => {
               if (typeof getWalletRequest.result !== 'undefined') {
-                throw new OneKeyInternalError(
-                  `Hardware wallet ${walletId} already exists.`,
+                reject(
+                  new OneKeyInternalError(
+                    `Hardware wallet ${walletId} already exists.`,
+                  ),
                 );
               }
               ret = {
                 id: walletId,
                 name,
+                avatar,
                 type: WALLET_TYPE_HW,
                 backuped: true,
                 accounts: [],
@@ -918,7 +998,10 @@ class IndexedDBApi implements DBAPI {
     );
   }
 
-  setWalletName(walletId: string, name: string): Promise<Wallet> {
+  setWalletNameAndAvatar(
+    walletId: string,
+    { name, avatar }: SetWalletNameAndAvatarParams,
+  ): Promise<Wallet> {
     let ret: Wallet;
     return this.ready.then(
       (db) =>
@@ -953,7 +1036,12 @@ class IndexedDBApi implements DBAPI {
               );
               return;
             }
-            wallet.name = name;
+            if (typeof name !== 'undefined') {
+              wallet.name = name;
+            }
+            if (typeof avatar !== 'undefined') {
+              wallet.avatar = avatar;
+            }
             ret = wallet;
             walletStore.put(wallet);
           };
@@ -1069,20 +1157,61 @@ class IndexedDBApi implements DBAPI {
     );
   }
 
+  confirmWalletCreated(walletId: string): Promise<Wallet> {
+    let ret: Wallet;
+    return this.ready.then(
+      (db) =>
+        new Promise((resolve, reject) => {
+          const transaction: IDBTransaction = db.transaction(
+            [CONTEXT_STORE_NAME],
+            'readwrite',
+          );
+          transaction.onerror = (_tevent) => {
+            reject(
+              new OneKeyInternalError('Failed to confirm HD wallet created.'),
+            );
+          };
+          transaction.oncomplete = (_tevent) => {
+            resolve(ret);
+          };
+
+          const contextStore = transaction.objectStore(CONTEXT_STORE_NAME);
+          const getMainContextRequest = contextStore.get(MAIN_CONTEXT);
+          getMainContextRequest.onsuccess = (_cevent) => {
+            const context: OneKeyContext =
+              getMainContextRequest.result as OneKeyContext;
+            if ((context.pendingWallets || []).includes(walletId)) {
+              context.pendingWallets = (context.pendingWallets || []).filter(
+                (pendingId) => pendingId !== walletId,
+              );
+              contextStore.put(context);
+            }
+
+            const getWalletRequest = db
+              .transaction([WALLET_STORE_NAME])
+              .objectStore(WALLET_STORE_NAME)
+              .get(walletId);
+            getWalletRequest.onsuccess = (_event) => {
+              const wallet = getWalletRequest.result as Wallet;
+              if (typeof wallet === 'undefined') {
+                reject(
+                  new OneKeyInternalError(`Wallet ${walletId} not found.`),
+                );
+                return;
+              }
+              ret = wallet;
+            };
+          };
+        }),
+    );
+  }
+
   addAccountToWallet(
     walletId: string,
     account: DBAccount,
     importedCredential?: PrivateKeyCredential,
   ): Promise<DBAccount> {
-    let addingImported = false;
-    if (walletIsImported(walletId)) {
-      if (typeof importedCredential === 'undefined') {
-        throw new OneKeyInternalError(
-          'Imported credential required for adding imported accounts.',
-        );
-      }
-      addingImported = true;
-    }
+    const addingImported = walletIsImported(walletId);
 
     let ret: DBAccount;
     return this.ready.then(
@@ -1180,8 +1309,15 @@ class IndexedDBApi implements DBAPI {
                   }
                   const context: OneKeyContext =
                     getMainContextRequest.result as OneKeyContext;
-                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                  if (!checkPassword(context, importedCredential!.password)) {
+                  if (!importedCredential) {
+                    reject(
+                      new OneKeyInternalError(
+                        'Imported credential required for adding imported accounts.',
+                      ),
+                    );
+                    return;
+                  }
+                  if (!checkPassword(context, importedCredential.password)) {
                     reject(new WrongPassword());
                     return;
                   }
@@ -1190,9 +1326,16 @@ class IndexedDBApi implements DBAPI {
                     credential: JSON.stringify({
                       privateKey:
                         // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-                        importedCredential!.privateKey.toString('hex'),
+                        importedCredential.privateKey.toString('hex'),
                     }),
                   });
+                  if (context.verifyString === DEFAULT_VERIFY_STRING) {
+                    context.verifyString = encrypt(
+                      importedCredential.password,
+                      Buffer.from(DEFAULT_VERIFY_STRING),
+                    ).toString('hex');
+                    transaction.objectStore(CONTEXT_STORE_NAME).put(context);
+                  }
                   wallet.nextAccountIds.global += 1;
                   walletStore.put(wallet);
                   transaction

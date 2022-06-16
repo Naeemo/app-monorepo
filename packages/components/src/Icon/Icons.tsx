@@ -95,6 +95,7 @@ import DatabaseOutline from "./react/outline/Database";
 import DesktopComputerOutline from "./react/outline/DesktopComputer";
 import DeviceMobileOutline from "./react/outline/DeviceMobile";
 import DeviceTabletOutline from "./react/outline/DeviceTablet";
+import DiscordOutline from "./react/outline/Discord";
 import DocumentOutline from "./react/outline/Document";
 import DocumentAddOutline from "./react/outline/DocumentAdd";
 import DocumentDownloadOutline from "./react/outline/DocumentDownload";
@@ -135,6 +136,7 @@ import HashtagOutline from "./react/outline/Hashtag";
 import HeartOutline from "./react/outline/Heart";
 import HomeOutline from "./react/outline/Home";
 import IdentificationOutline from "./react/outline/Identification";
+import ImportOutline from "./react/outline/Import";
 import InboxOutline from "./react/outline/Inbox";
 import InboxInOutline from "./react/outline/InboxIn";
 import InformationCircleOutline from "./react/outline/InformationCircle";
@@ -197,6 +199,7 @@ import RssOutline from "./react/outline/Rss";
 import SaveOutline from "./react/outline/Save";
 import SaveAsOutline from "./react/outline/SaveAs";
 import ScaleOutline from "./react/outline/Scale";
+import ScanOutline from "./react/outline/Scan";
 import ScissorsOutline from "./react/outline/Scissors";
 import SearchOutline from "./react/outline/Search";
 import SearchCircleOutline from "./react/outline/SearchCircle";
@@ -231,6 +234,7 @@ import TrashOutline from "./react/outline/Trash";
 import TrendingDownOutline from "./react/outline/TrendingDown";
 import TrendingUpOutline from "./react/outline/TrendingUp";
 import TruckOutline from "./react/outline/Truck";
+import TwitterOutline from "./react/outline/Twitter";
 import UploadOutline from "./react/outline/Upload";
 import UserOutline from "./react/outline/User";
 import UserAddOutline from "./react/outline/UserAdd";
@@ -247,6 +251,7 @@ import ViewListOutline from "./react/outline/ViewList";
 import VolumeOffOutline from "./react/outline/VolumeOff";
 import VolumeUpOutline from "./react/outline/VolumeUp";
 import WalletOutline from "./react/outline/Wallet";
+import WalletAddOutline from "./react/outline/WalletAdd";
 import WifiOutline from "./react/outline/Wifi";
 import ZoomInOutline from "./react/outline/ZoomIn";
 import ZoomOutOutline from "./react/outline/ZoomOut";
@@ -335,6 +340,8 @@ import DatabaseSolid from "./react/solid/Database";
 import DesktopComputerSolid from "./react/solid/DesktopComputer";
 import DeviceMobileSolid from "./react/solid/DeviceMobile";
 import DeviceTabletSolid from "./react/solid/DeviceTablet";
+import DialogIconTypeDangerSolid from "./react/solid/DialogIconTypeDanger";
+import DialogIconTypeInfoSolid from "./react/solid/DialogIconTypeInfo";
 import DocumentSolid from "./react/solid/Document";
 import DocumentAddSolid from "./react/solid/DocumentAdd";
 import DocumentDownloadSolid from "./react/solid/DocumentDownload";
@@ -401,8 +408,21 @@ import MinusCircleSolid from "./react/solid/MinusCircle";
 import MinusSmSolid from "./react/solid/MinusSm";
 import MoonSolid from "./react/solid/Moon";
 import MusicNoteSolid from "./react/solid/MusicNote";
+import NavActivitySolid from "./react/solid/NavActivity";
+import NavBankCardSolid from "./react/solid/NavBankCard";
+import NavBuySolid from "./react/solid/NavBuy";
+import NavDiscoverySolid from "./react/solid/NavDiscovery";
+import NavHomeSolid from "./react/solid/NavHome";
+import NavMenuSolid from "./react/solid/NavMenu";
+import NavReceiveSolid from "./react/solid/NavReceive";
+import NavSellSolid from "./react/solid/NavSell";
+import NavSendSolid from "./react/solid/NavSend";
+import NavSettingsSolid from "./react/solid/NavSettings";
+import NavSwapSolid from "./react/solid/NavSwap";
 import NewspaperSolid from "./react/solid/Newspaper";
 import OfficeBuildingSolid from "./react/solid/OfficeBuilding";
+import OfflineSolid from "./react/solid/Offline";
+import OptionListAllSolid from "./react/solid/OptionListAll";
 import PaperAirplaneSolid from "./react/solid/PaperAirplane";
 import PaperClipSolid from "./react/solid/PaperClip";
 import PauseSolid from "./react/solid/Pause";
@@ -485,7 +505,7 @@ import VolumeUpSolid from "./react/solid/VolumeUp";
 import WifiSolid from "./react/solid/Wifi";
 import ZoomInSolid from "./react/solid/ZoomIn";
 import ZoomOutSolid from "./react/solid/ZoomOut";
-import OfficeSolid from "./react/solid/Offline";
+
 export type ICON_NAMES =
   | "BrandLogoIllus"
   | "CrownBadgeIllus"
@@ -582,6 +602,7 @@ export type ICON_NAMES =
   | "DesktopComputerOutline"
   | "DeviceMobileOutline"
   | "DeviceTabletOutline"
+  | "DiscordOutline"
   | "DocumentOutline"
   | "DocumentAddOutline"
   | "DocumentDownloadOutline"
@@ -622,6 +643,7 @@ export type ICON_NAMES =
   | "HeartOutline"
   | "HomeOutline"
   | "IdentificationOutline"
+  | "ImportOutline"
   | "InboxOutline"
   | "InboxInOutline"
   | "InformationCircleOutline"
@@ -684,6 +706,7 @@ export type ICON_NAMES =
   | "SaveOutline"
   | "SaveAsOutline"
   | "ScaleOutline"
+  | "ScanOutline"
   | "ScissorsOutline"
   | "SearchOutline"
   | "SearchCircleOutline"
@@ -718,6 +741,7 @@ export type ICON_NAMES =
   | "TrendingDownOutline"
   | "TrendingUpOutline"
   | "TruckOutline"
+  | "TwitterOutline"
   | "UploadOutline"
   | "UserOutline"
   | "UserAddOutline"
@@ -734,6 +758,7 @@ export type ICON_NAMES =
   | "VolumeOffOutline"
   | "VolumeUpOutline"
   | "WalletOutline"
+  | "WalletAddOutline"
   | "WifiOutline"
   | "ZoomInOutline"
   | "ZoomOutOutline"
@@ -822,6 +847,8 @@ export type ICON_NAMES =
   | "DesktopComputerSolid"
   | "DeviceMobileSolid"
   | "DeviceTabletSolid"
+  | "DialogIconTypeDangerSolid"
+  | "DialogIconTypeInfoSolid"
   | "DocumentSolid"
   | "DocumentAddSolid"
   | "DocumentDownloadSolid"
@@ -888,8 +915,21 @@ export type ICON_NAMES =
   | "MinusSmSolid"
   | "MoonSolid"
   | "MusicNoteSolid"
+  | "NavActivitySolid"
+  | "NavBankCardSolid"
+  | "NavBuySolid"
+  | "NavDiscoverySolid"
+  | "NavHomeSolid"
+  | "NavMenuSolid"
+  | "NavReceiveSolid"
+  | "NavSellSolid"
+  | "NavSendSolid"
+  | "NavSettingsSolid"
+  | "NavSwapSolid"
   | "NewspaperSolid"
   | "OfficeBuildingSolid"
+  | "OfflineSolid"
+  | "OptionListAllSolid"
   | "PaperAirplaneSolid"
   | "PaperClipSolid"
   | "PauseSolid"
@@ -971,8 +1011,7 @@ export type ICON_NAMES =
   | "VolumeUpSolid"
   | "WifiSolid"
   | "ZoomInSolid"
-  | "ZoomOutSolid" 
-  | "OfficeSolid";
+  | "ZoomOutSolid";
 
 export default {
   BrandLogoIllus: BrandLogoIllus,
@@ -1070,6 +1109,7 @@ export default {
   DesktopComputerOutline: DesktopComputerOutline,
   DeviceMobileOutline: DeviceMobileOutline,
   DeviceTabletOutline: DeviceTabletOutline,
+  DiscordOutline: DiscordOutline,
   DocumentOutline: DocumentOutline,
   DocumentAddOutline: DocumentAddOutline,
   DocumentDownloadOutline: DocumentDownloadOutline,
@@ -1110,6 +1150,7 @@ export default {
   HeartOutline: HeartOutline,
   HomeOutline: HomeOutline,
   IdentificationOutline: IdentificationOutline,
+  ImportOutline: ImportOutline,
   InboxOutline: InboxOutline,
   InboxInOutline: InboxInOutline,
   InformationCircleOutline: InformationCircleOutline,
@@ -1172,6 +1213,7 @@ export default {
   SaveOutline: SaveOutline,
   SaveAsOutline: SaveAsOutline,
   ScaleOutline: ScaleOutline,
+  ScanOutline: ScanOutline,
   ScissorsOutline: ScissorsOutline,
   SearchOutline: SearchOutline,
   SearchCircleOutline: SearchCircleOutline,
@@ -1206,6 +1248,7 @@ export default {
   TrendingDownOutline: TrendingDownOutline,
   TrendingUpOutline: TrendingUpOutline,
   TruckOutline: TruckOutline,
+  TwitterOutline: TwitterOutline,
   UploadOutline: UploadOutline,
   UserOutline: UserOutline,
   UserAddOutline: UserAddOutline,
@@ -1222,6 +1265,7 @@ export default {
   VolumeOffOutline: VolumeOffOutline,
   VolumeUpOutline: VolumeUpOutline,
   WalletOutline: WalletOutline,
+  WalletAddOutline: WalletAddOutline,
   WifiOutline: WifiOutline,
   ZoomInOutline: ZoomInOutline,
   ZoomOutOutline: ZoomOutOutline,
@@ -1310,6 +1354,8 @@ export default {
   DesktopComputerSolid: DesktopComputerSolid,
   DeviceMobileSolid: DeviceMobileSolid,
   DeviceTabletSolid: DeviceTabletSolid,
+  DialogIconTypeDangerSolid: DialogIconTypeDangerSolid,
+  DialogIconTypeInfoSolid: DialogIconTypeInfoSolid,
   DocumentSolid: DocumentSolid,
   DocumentAddSolid: DocumentAddSolid,
   DocumentDownloadSolid: DocumentDownloadSolid,
@@ -1376,8 +1422,21 @@ export default {
   MinusSmSolid: MinusSmSolid,
   MoonSolid: MoonSolid,
   MusicNoteSolid: MusicNoteSolid,
+  NavActivitySolid: NavActivitySolid,
+  NavBankCardSolid: NavBankCardSolid,
+  NavBuySolid: NavBuySolid,
+  NavDiscoverySolid: NavDiscoverySolid,
+  NavHomeSolid: NavHomeSolid,
+  NavMenuSolid: NavMenuSolid,
+  NavReceiveSolid: NavReceiveSolid,
+  NavSellSolid: NavSellSolid,
+  NavSendSolid: NavSendSolid,
+  NavSettingsSolid: NavSettingsSolid,
+  NavSwapSolid: NavSwapSolid,
   NewspaperSolid: NewspaperSolid,
   OfficeBuildingSolid: OfficeBuildingSolid,
+  OfflineSolid: OfflineSolid,
+  OptionListAllSolid: OptionListAllSolid,
   PaperAirplaneSolid: PaperAirplaneSolid,
   PaperClipSolid: PaperClipSolid,
   PauseSolid: PauseSolid,
@@ -1460,5 +1519,4 @@ export default {
   WifiSolid: WifiSolid,
   ZoomInSolid: ZoomInSolid,
   ZoomOutSolid: ZoomOutSolid,
-  OfficeSolid: OfficeSolid,
 };

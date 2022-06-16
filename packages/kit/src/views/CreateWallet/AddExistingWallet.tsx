@@ -38,15 +38,16 @@ const AddExistingWallet = () => {
   const intl = useIntl();
   const [isOk, setOk] = useState(false);
   const isSmallScreen = useIsVerticalLayout();
-  const { params: { mode } = { mode: 'all' } } = useRoute<RouteProps>();
+  const { params: { mode, presetText } = { mode: 'all', presetText: '' } } =
+    useRoute<RouteProps>();
   const navigation = useNavigation<NavigationProps['navigation']>();
   const { control, handleSubmit, setValue, getValues, trigger, watch } =
     useForm<AddExistingWalletValues>({
-      defaultValues: { text: '' },
+      defaultValues: { text: presetText },
       mode: 'onChange',
     });
 
-  const watchedText = useDebounce(watch('text'), 1000);
+  const watchedText = useDebounce(watch('text'), 400);
 
   useEffect(() => {
     async function validate(text: string) {
@@ -80,14 +81,14 @@ const AddExistingWallet = () => {
         navigation.navigate(CreateWalletModalRoutes.AppWalletDoneModal, {
           mnemonic: values.text,
         });
-      } else if (category === UserCreateInputCategory.ADDRESS) {
-        navigation.navigate(CreateWalletModalRoutes.AddWatchAccountModal, {
-          address: values.text,
-          selectableNetworks,
-        });
       } else if (category === UserCreateInputCategory.PRIVATE_KEY) {
         navigation.navigate(CreateWalletModalRoutes.AddImportedAccountModal, {
           privatekey: values.text,
+          selectableNetworks,
+        });
+      } else if (category === UserCreateInputCategory.ADDRESS) {
+        navigation.navigate(CreateWalletModalRoutes.AddWatchAccountModal, {
+          address: values.text,
           selectableNetworks,
         });
       }
@@ -123,29 +124,11 @@ const AddExistingWallet = () => {
     return words.filter(Boolean).join(',');
   }, [intl, mode]);
 
-  // copied from somewhere
-  const startRestoreModal = useCallback(
-    (inputPwd: string, callBack: () => void) => {
-      navigation.navigate(CreateWalletModalRoutes.OnekeyLiteRestoreModal, {
-        pwd: inputPwd,
-        onRetry: () => {
-          callBack?.();
-        },
-      });
-    },
-    [navigation],
-  );
-
   const startRestorePinVerifyModal = useCallback(() => {
-    navigation.navigate(CreateWalletModalRoutes.OnekeyLitePinCodeVerifyModal, {
-      callBack: (inputPwd) => {
-        startRestoreModal(inputPwd, () => {
-          startRestorePinVerifyModal();
-        });
-        return true;
-      },
-    });
-  }, [navigation, startRestoreModal]);
+    navigation.navigate(
+      CreateWalletModalRoutes.OnekeyLiteRestorePinCodeVerifyModal,
+    );
+  }, [navigation]);
 
   return (
     <Modal

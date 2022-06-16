@@ -4,21 +4,25 @@ import { ControllerProps, FieldValues } from 'react-hook-form';
 import { useIntl } from 'react-intl';
 
 import { Form } from '@onekeyhq/components';
+import { useIsVerticalLayout } from '@onekeyhq/components/src/Provider/hooks';
 import type { Network } from '@onekeyhq/engine/src/types/network';
 import { useManageNetworks } from '@onekeyhq/kit/src/hooks';
 import { useGeneral } from '@onekeyhq/kit/src/hooks/redux';
 
 type FormChainSelectorProps = {
   selectableNetworks?: Array<string>;
+  hideHelpText?: boolean;
 };
 
 function FormChainSelector<TFieldValues extends FieldValues = FieldValues>({
   selectableNetworks,
+  hideHelpText = false,
   ...props
 }: Omit<ControllerProps<TFieldValues>, 'render'> & FormChainSelectorProps) {
   const intl = useIntl();
   const { enabledNetworks: networks } = useManageNetworks();
   const { activeNetworkId: currentNetworkId } = useGeneral();
+  const isSmallScreen = useIsVerticalLayout();
 
   let defaultNetworkId = currentNetworkId;
   // If selectableNetworks is specified and currenct selected network not in
@@ -71,32 +75,32 @@ function FormChainSelector<TFieldValues extends FieldValues = FieldValues>({
   return (
     <Form.Item
       label={intl.formatMessage({ id: 'network__network' })}
-      helpText={(activeNetworkId = defaultNetworkId) => {
-        const activeNetworkPayload = findActiveNetwork(activeNetworkId);
-        return intl.formatMessage(
-          {
-            id: 'form__network_helperText',
-          },
-          {
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-            impl: activeNetworkPayload?.impl ?? '-',
-          },
-        );
-      }}
+      helpText={
+        hideHelpText
+          ? undefined
+          : (activeNetworkId = defaultNetworkId) => {
+              const activeNetworkPayload = findActiveNetwork(activeNetworkId);
+              return intl.formatMessage(
+                {
+                  id: 'form__network_helperText',
+                },
+                {
+                  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+                  impl: activeNetworkPayload?.impl ?? '-',
+                },
+              );
+            }
+      }
       defaultValue={defaultNetworkId as any}
       {...props}
     >
       <Form.Select
         title={intl.formatMessage({ id: 'network__network' })}
         footer={null}
-        containerProps={{
-          padding: 0,
-        }}
-        triggerProps={{
-          py: 2,
-        }}
+        triggerSize={isSmallScreen ? 'xl' : 'default'}
         options={options}
-        dropdownProps={{ width: '352px', maxHeight: '400px' }}
+        headerShown={false}
+        dropdownProps={!isSmallScreen ? { maxHeight: '272px' } : undefined}
         dropdownPosition="right"
       />
     </Form.Item>

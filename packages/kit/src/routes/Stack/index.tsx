@@ -1,24 +1,25 @@
-/* eslint-disable no-nested-ternary */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
-import React, { useCallback, useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { AppState, AppStateStatus, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
-import { useThemeValue } from '@onekeyhq/components';
+import { Box, useIsVerticalLayout, useThemeValue } from '@onekeyhq/components';
+import { setMainScreenDom } from '@onekeyhq/components/src/utils/SelectAutoHide';
+import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
+import {
+  available,
+  enable,
+} from '@onekeyhq/kit/src/store/reducers/autoUpdater';
+import appUpdates from '@onekeyhq/kit/src/utils/updates/AppUpdates';
 import DAppList from '@onekeyhq/kit/src/views/Discover/DAppList';
 import { Discover } from '@onekeyhq/kit/src/views/Discover/Home';
+import FaceID from '@onekeyhq/kit/src/views/FaceID';
 import OnekeyLiteDetail from '@onekeyhq/kit/src/views/Hardware/OnekeyLite/Detail';
-import Settings from '@onekeyhq/kit/src/views/Settings';
 import TokenDetail from '@onekeyhq/kit/src/views/TokenDetail';
-import Unlock from '@onekeyhq/kit/src/views/Unlock';
+import TransactionHistory from '@onekeyhq/kit/src/views/TransactionHistory';
+import UpdateAlert from '@onekeyhq/kit/src/views/Update/Alert';
 import Webview from '@onekeyhq/kit/src/views/Webview';
-import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
-import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
-import { useInterval } from '../../hooks';
-import { useData, useSettings, useStatus } from '../../hooks/redux';
-import { lock, refreshLastActivity } from '../../store/reducers/status';
 import Dev from '../Dev';
 import Drawer from '../Drawer';
 import { HomeRoutes, HomeRoutesParams } from '../types';
@@ -29,10 +30,6 @@ export const stackScreenList = [
   {
     name: HomeRoutes.ScreenTokenDetail,
     component: TokenDetail,
-  },
-  {
-    name: HomeRoutes.SettingsScreen,
-    component: Settings,
   },
   {
     name: HomeRoutes.SettingsWebviewScreen,
@@ -50,16 +47,39 @@ export const stackScreenList = [
     name: HomeRoutes.DAppListScreen,
     component: DAppList,
   },
+  {
+    name: HomeRoutes.TransactionHistoryScreen,
+    component: TransactionHistory,
+  },
+  {
+    name: HomeRoutes.FaceId,
+    component: FaceID,
+  },
 ];
 
 export const StackNavigator = createNativeStackNavigator<HomeRoutesParams>();
 
 const Dashboard = () => {
+  const isVerticalLayout = useIsVerticalLayout();
   const [bgColor, textColor, borderBottomColor] = useThemeValue([
-    'surface-subdued',
+    'background-default',
     'text-default',
     'border-subdued',
   ]);
+
+  const stackScreens = useMemo(() => {
+    if (!isVerticalLayout) {
+      return null;
+    }
+
+    return stackScreenList.map((stack) => (
+      <StackNavigator.Screen
+        key={stack.name}
+        name={stack.name}
+        component={stack.component}
+      />
+    ));
+  }, [isVerticalLayout]);
 
   return (
     <StackNavigator.Navigator>
@@ -77,7 +97,7 @@ const Dashboard = () => {
           headerStyle: {
             backgroundColor: bgColor,
             // @ts-expect-error
-            borderBottomColor,
+            borderBottomWidth: 0,
             shadowColor: borderBottomColor,
           },
           header:
@@ -85,87 +105,42 @@ const Dashboard = () => {
           headerTintColor: textColor,
         }}
       >
-        {stackScreenList.map((stack) => (
-          <StackNavigator.Screen
-            key={stack.name}
-            name={stack.name}
-            component={stack.component}
-          />
-        ))}
+        {stackScreens}
       </StackNavigator.Group>
     </StackNavigator.Navigator>
   );
 };
 
-const MainScreen = () => {
+function MainScreen() {
   const { dispatch } = backgroundApiProxy;
-  const { appLockDuration, enableAppLock } = useSettings();
-  const { lastActivity, isUnlock } = useStatus();
-  const { isUnlock: isDataUnlock, isPasswordSet } = useData();
-  const preconditon = isPasswordSet && enableAppLock;
 
-  const refresh = useCallback(() => {
-    if (AppState.currentState === 'active') {
-      dispatch(refreshLastActivity());
-    }
-  }, [dispatch]);
-  useInterval(refresh, 30 * 1000);
-
-  const onChange = useCallback(
-    (state: AppStateStatus) => {
-      if (appLockDuration === 0) {
-        if (state === 'background') {
-          dispatch(lock());
+  const autoCheckUpdate = () => {
+    appUpdates
+      .checkAppUpdate()
+      .then((versionInfo) => {
+        if (versionInfo) {
+          dispatch(enable());
+          dispatch(available(versionInfo));
         }
-        return;
-      }
-      if (state !== 'active') {
-        return;
-      }
-      const idleDuration = Math.floor(
-        (Date.now() - lastActivity) / (1000 * 60),
-      );
-      const isStale = idleDuration >= appLockDuration;
-      if (isStale) {
-        dispatch(lock());
-      }
-    },
-    [dispatch, appLockDuration, lastActivity],
-  );
+      })
+      .catch(() => {
+        // TODO sentry collect error
+      });
+  };
 
   useEffect(() => {
-    if (platformEnv.isExtension || !preconditon) {
-      return;
-    }
-    // AppState.addEventListener return subscription object in native env, but return empty in web env
-    const subscription = AppState.addEventListener('change', onChange);
-    return () => {
-      // @ts-ignore
-      if (subscription) {
-        // @ts-ignore
-        subscription?.remove();
-      } else {
-        AppState.removeEventListener('change', onChange);
-      }
-    };
-  }, [dispatch, onChange, preconditon]);
-
-  useEffect(() => {
-    if (platformEnv.isNative || !preconditon) {
-      return;
-    }
-    const idleDuration = Math.floor((Date.now() - lastActivity) / (1000 * 60));
-    const isStale = idleDuration >= appLockDuration;
-    if (isStale) {
-      dispatch(lock());
-    }
+    autoCheckUpdate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!preconditon) {
-    return <Dashboard />;
-  }
-  return isUnlock && isDataUnlock ? <Dashboard /> : <Unlock />;
-};
+  return (
+    <Box ref={setMainScreenDom} w="full" h="full">
+      <Dashboard />
+
+      {/* TODO Waiting notification component */}
+      <UpdateAlert />
+    </Box>
+  );
+}
 
 export default MainScreen;

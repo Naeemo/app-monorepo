@@ -14,7 +14,7 @@ import {
   useSafeAreaInsets,
 } from '@onekeyhq/components';
 import {
-  EVMDecodedItem,
+  EVMDecodedItemERC20Approve,
   InfiniteAmountText,
 } from '@onekeyhq/engine/src/vaults/impl/evm/decoder/decoder';
 
@@ -45,11 +45,12 @@ function TokenApproveAmountEdit({ ...rest }) {
   const isSmallScreen = useIsVerticalLayout();
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<RouteProps>();
-  const { networkId, accountId } = useActiveWalletAccount();
+  const { networkId, accountId, network } = useActiveWalletAccount();
   const { encodedTx, tokenApproveAmount, isMaxAmount } = route.params;
   const [isMax, setIsMax] = useState(isMaxAmount);
-  const decodedTx = route.params.decodedTx as EVMDecodedItem | null;
-  const token = decodedTx?.info?.token;
+  const { decodedTx } = route.params;
+  const info = decodedTx?.info as EVMDecodedItemERC20Approve;
+  const token = info?.token;
   const symbol = token?.symbol;
 
   const {
@@ -65,6 +66,9 @@ function TokenApproveAmountEdit({ ...rest }) {
   });
   const onSubmit = handleSubmit(async (data) => {
     if (!navigation.canGoBack()) {
+      return;
+    }
+    if (!encodedTx) {
       return;
     }
     const amount = isMax ? InfiniteAmountText : data.amount;
@@ -140,10 +144,18 @@ function TokenApproveAmountEdit({ ...rest }) {
                 {
                   id: 'content__if_you_choose_max',
                 },
-                { 0: route.params.sourceInfo?.origin ?? '--' },
+                {
+                  0:
+                    route.params.sourceInfo?.origin ??
+                    network?.shortName ??
+                    '--',
+                },
               )}
             >
               <Form.NumberInput
+                w="full"
+                size="xl"
+                // size={isSmallScreen ? 'xl' : undefined}
                 decimal={token?.decimals}
                 rightText={symbol}
                 enableMaxButton

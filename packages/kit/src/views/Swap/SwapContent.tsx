@@ -1,50 +1,56 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 
-import BigNumber from 'bignumber.js';
 import { useIntl } from 'react-intl';
 
 import {
-  Alert,
   Box,
-  Button,
   Center,
   Divider,
   IconButton,
   Typography,
+  useTheme,
 } from '@onekeyhq/components';
 import { ModalRoutes, RootRoutes } from '@onekeyhq/kit/src/routes/types';
 
 import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
-import {
-  useNavigation,
-  useSwap,
-  useSwapEnabled,
-  useSwapQuote,
-} from '../../hooks';
+import { useNavigation } from '../../hooks';
 import { useActiveWalletAccount } from '../../hooks/redux';
-import { SendRoutes } from '../Send/types';
+import { setQuote } from '../../store/reducers/swap';
 
 import TokenInput from './components/TokenInput';
 import ExchangeRate from './ExchangeRate';
+import {
+  useSwap,
+  useSwapActionHandlers,
+  useSwapEnabled,
+  useSwapQuoteCallback,
+  useSwapState,
+} from './hooks/useSwap';
+import SwapAlert from './SwapAlert';
+import SwapButton from './SwapButton';
 import { SwapRoutes } from './typings';
 
 const SwapContent = () => {
   const intl = useIntl();
-  const isSwapEnabled = useSwapEnabled();
-  const { account, network } = useActiveWalletAccount();
   const {
-    input,
-    output,
-    inputAmount,
-    outputAmount,
-    setInAmount,
-    setOutAmount,
-    setIndependentField,
-    switchInputOutput,
-  } = useSwap();
-  const { refresh, data, isLoading, error } = useSwapQuote();
+    inputToken,
+    inputTokenNetwork,
+    outputToken,
+    outputTokenNetwork,
+    typedValue,
+    independentField,
+  } = useSwapState();
+  const isSwapEnabled = useSwapEnabled();
+  const onSwapQuoteCallback = useSwapQuoteCallback({ silent: false });
+  const { onUserInput, onSwitchTokens } = useSwapActionHandlers();
+  const { account, wallet, network } = useActiveWalletAccount();
+  const { themeVariant } = useTheme();
+
+  const isDisabled = !isSwapEnabled || !wallet || !account;
+
+  const { swapQuote, formattedAmounts, isSwapLoading } = useSwap();
   const navigation = useNavigation();
-  const onInputPress = useCallback(() => {
+  const onSelectInput = useCallback(() => {
     navigation.navigate(RootRoutes.Modal, {
       screen: ModalRoutes.Swap,
       params: {
@@ -52,7 +58,7 @@ const SwapContent = () => {
       },
     });
   }, [navigation]);
-  const onOutputPress = useCallback(() => {
+  const onSelectOutput = useCallback(() => {
     navigation.navigate(RootRoutes.Modal, {
       screen: ModalRoutes.Swap,
       params: {
@@ -60,123 +66,66 @@ const SwapContent = () => {
       },
     });
   }, [navigation]);
-  const onInputChange = useCallback(
+  const onChangeInput = useCallback(
     (value: string) => {
-      setInAmount(value);
-      setIndependentField('INPUT');
-      refresh();
+      onUserInput('INPUT', value);
     },
-    [setInAmount, setIndependentField, refresh],
+    [onUserInput],
   );
-  const onOutputChange = useCallback(
+  const onChangeOutput = useCallback(
     (value: string) => {
-      setOutAmount(value);
-      setIndependentField('OUTPUT');
-      refresh();
+      onUserInput('OUTPUT', value);
     },
-    [setOutAmount, setIndependentField, refresh],
+    [onUserInput],
   );
-  const onSwitch = useCallback(() => {
-    switchInputOutput();
-    refresh();
-  }, [switchInputOutput, refresh]);
 
-  const onSubmit = useCallback(async () => {
-    if (data) {
-      // check approve
-      if (
-        data.needApprove &&
-        data.sellTokenAddress !== '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-      ) {
-        if (account && network) {
-          const allowance = await backgroundApiProxy.engine.getTokenAllowance({
-            networkId: network?.id,
-            accountId: account.id,
-            tokenIdOnNetwork: data.sellTokenAddress,
-            spender: data.allowanceTarget,
-          });
-          const bnAllowance = new BigNumber(allowance || '0');
-          const bnInput = new BigNumber(data.sellAmount || '0');
-          if (bnAllowance.lt(bnInput)) {
-            const encodedTx =
-              await backgroundApiProxy.engine.buildEncodedTxFromApprove({
-                networkId: network.id,
-                accountId: account.id,
-                spender: data.allowanceTarget,
-                token: data.sellTokenAddress,
-                amount: 'unlimited',
-              });
-            console.log('encodedTx', encodedTx);
-            //  approve transaction
-            navigation.navigate(RootRoutes.Modal, {
-              screen: ModalRoutes.Send,
-              params: {
-                screen: SendRoutes.SendConfirm,
-                params: {
-                  encodedTx: { ...encodedTx, from: account?.address },
-                  sourceInfo: {
-                    id: '0',
-                    origin: 'Swap Token Approve',
-                    scope: 'ethereum',
-                    data: data.data || '',
-                  },
-                },
-              },
-            });
-            return;
-          }
-        }
-      }
-      navigation.navigate(RootRoutes.Modal, {
-        screen: ModalRoutes.Send,
-        params: {
-          screen: SendRoutes.SendConfirm,
-          params: {
-            encodedTx: { ...data, from: account?.address },
-            sourceInfo: {
-              id: '0',
-              origin: 'OneKey Swap',
-              scope: 'ethereum',
-              data: data.data || '',
-            },
-          },
-        },
-      });
-    }
-  }, [data, account, navigation, network]);
+  useEffect(() => {
+    backgroundApiProxy.dispatch(setQuote(undefined));
+  }, [
+    inputToken?.tokenIdOnNetwork,
+    outputToken?.tokenIdOnNetwork,
+    typedValue,
+    independentField,
+  ]);
 
-  let buttonText = intl.formatMessage({ id: 'title__swap' });
+  useEffect(() => {
+    onSwapQuoteCallback();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onSwapQuoteCallback]);
 
-  if (error) {
-    buttonText = error;
-  } else if (data?.needApprove) {
-    buttonText = 'Approved';
-  }
+  const disableSwitchTokens =
+    (outputTokenNetwork && outputTokenNetwork.id !== network?.id) ||
+    (inputTokenNetwork && inputTokenNetwork.id !== network?.id);
 
   return (
     <Center px="4">
       <Box
         bg="surface-default"
-        shadow="depth.2"
         maxW="420"
         w="full"
-        borderRadius={12}
-        px="4"
-        py="6"
+        borderRadius="3xl"
+        p={4}
+        borderWidth={themeVariant === 'light' ? 1 : undefined}
+        borderColor="border-subdued"
       >
         <Box
-          borderWidth="0.5"
+          borderWidth={{ base: '0.5', md: '1' }}
           borderColor="border-default"
           bg="surface-subdued"
           borderRadius={12}
           position="relative"
         >
           <TokenInput
+            type="INPUT"
             label={intl.formatMessage({ id: 'content__from' })}
-            token={input}
-            inputValue={inputAmount}
-            onChange={onInputChange}
-            onPress={onInputPress}
+            token={inputToken}
+            tokenNetwork={inputTokenNetwork}
+            inputValue={formattedAmounts.INPUT}
+            onChange={onChangeInput}
+            onPress={onSelectInput}
+            containerProps={{ pt: '4', pb: '0' }}
+            isDisabled={isSwapLoading && independentField === 'OUTPUT'}
+            showMax={!!(inputToken && inputToken.tokenIdOnNetwork)}
           />
           <Box w="full" h="10" position="relative">
             <Box position="absolute" w="full" h="full">
@@ -188,25 +137,29 @@ const SwapContent = () => {
               <IconButton
                 w="10"
                 h="10"
-                name="SwitchVerticalSolid"
+                name="SwitchVerticalOutline"
                 borderRadius="full"
                 borderColor="border-disabled"
                 borderWidth="0.5"
+                disabled={disableSwitchTokens}
                 bg="surface-default"
-                onPress={onSwitch}
+                onPress={onSwitchTokens}
+                size="lg"
               />
             </Center>
           </Box>
           <TokenInput
+            type="OUTPUT"
             label={intl.formatMessage({ id: 'content__to' })}
-            token={output}
-            inputValue={outputAmount}
-            onChange={onOutputChange}
-            onPress={onOutputPress}
+            token={outputToken}
+            tokenNetwork={outputTokenNetwork}
+            inputValue={formattedAmounts.OUTPUT}
+            onChange={onChangeOutput}
+            onPress={onSelectOutput}
+            containerProps={{ pb: '4', pt: '0' }}
+            isDisabled={isSwapLoading && independentField === 'INPUT'}
           />
-          {!isSwapEnabled ? (
-            <Box w="full" h="full" position="absolute" />
-          ) : null}
+          {isDisabled ? <Box w="full" h="full" position="absolute" /> : null}
         </Box>
         <Box
           display="flex"
@@ -219,39 +172,17 @@ const SwapContent = () => {
           <Typography.Body2 color="text-subdued">
             {intl.formatMessage({ id: 'Rate' })}
           </Typography.Body2>
-          <Typography.Body2 color="text-default">
-            {data && input?.symbol && output?.symbol ? (
-              <ExchangeRate
-                inputSymbol={input?.symbol}
-                outputSymbol={output?.symbol}
-                price={data.price}
-              />
-            ) : (
-              '---'
-            )}
-          </Typography.Body2>
-        </Box>
-        {!isSwapEnabled ? (
-          <Box mb="6">
-            <Alert
-              title={intl.formatMessage({ id: 'msg__wrong_network' })}
-              description={intl.formatMessage({
-                id: 'msg__wrong_network_desc',
-              })}
-              alertType="error"
-              dismiss={false}
+          <Box flex="1" flexDirection="row" justifyContent="flex-end">
+            <ExchangeRate
+              tokenA={inputToken}
+              tokenB={outputToken}
+              quote={swapQuote}
+              independentField={independentField}
             />
           </Box>
-        ) : null}
-        <Button
-          size="lg"
-          type="primary"
-          isDisabled={!!error || !isSwapEnabled || !data}
-          isLoading={isLoading}
-          onPress={onSubmit}
-        >
-          {buttonText}
-        </Button>
+        </Box>
+        <SwapAlert />
+        <SwapButton />
       </Box>
     </Center>
   );

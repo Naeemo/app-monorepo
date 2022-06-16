@@ -1,4 +1,6 @@
-/* eslint-disable global-require, no-restricted-syntax */
+/* eslint-disable global-require, no-restricted-syntax, import/no-unresolved */
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
+
 if (typeof __dirname === 'undefined') global.__dirname = '/';
 if (typeof __filename === 'undefined') global.__filename = '';
 if (typeof process === 'undefined') {
@@ -10,6 +12,13 @@ if (typeof process === 'undefined') {
       process[p] = bProcess[p];
     }
   }
+}
+
+// BigInt polyfill
+// TODO: this is still needed for Android + Hermes engine compiling, though we
+// don't actually use it. Remove after v8 engine is used on Android.
+if (typeof BigInt === 'undefined') {
+  global.BigInt = require('big-integer');
 }
 
 // TextEncoder and TextDecoder polyfill for starcoin
@@ -25,3 +34,35 @@ if (typeof Buffer === 'undefined') global.Buffer = require('buffer').Buffer;
 
 // Crypto polyfill
 if (typeof crypto === 'undefined') global.crypto = require('crypto');
+
+if (platformEnv.isNativeAndroid) {
+  const consoleLog = console.log;
+  const shimConsoleLog = (method) => {
+    const originMethod = console[method];
+    if (!originMethod) {
+      return;
+    }
+    console[method] = (...args) => {
+      if (process.env.NODE_ENV !== 'production') {
+        // consoleLog(`android console.${method} shim`);
+      }
+      args.forEach((item) => {
+        if (item instanceof Error) {
+          // sometimes error.stack cause Android hermes engine crash
+          delete item.stack;
+        }
+      });
+      originMethod(...args);
+    };
+  };
+  shimConsoleLog('log');
+  shimConsoleLog('info');
+  shimConsoleLog('debug');
+  shimConsoleLog('warn');
+  shimConsoleLog('error');
+}
+
+if (platformEnv.isNativeIOS) {
+  // typeforce causes iOS to crash.
+  Error.captureStackTrace = () => {};
+}

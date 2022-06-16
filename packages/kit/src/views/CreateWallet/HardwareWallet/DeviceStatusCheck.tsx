@@ -1,9 +1,16 @@
-import React, { FC, useEffect } from 'react';
+import React, { FC, useCallback, useEffect } from 'react';
 
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { useIntl } from 'react-intl';
 
-import { Center, Modal, Spinner, Typography } from '@onekeyhq/components';
+import {
+  Center,
+  Modal,
+  Spinner,
+  ToastManager,
+  Typography,
+} from '@onekeyhq/components';
+import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
 import {
   CreateWalletModalRoutes,
   CreateWalletRoutesParams,
@@ -14,10 +21,8 @@ import {
   RootRoutes,
   RootRoutesParams,
 } from '@onekeyhq/kit/src/routes/types';
-
-import backgroundApiProxy from '../../../background/instance/backgroundApiProxy';
-import { useActiveWalletAccount } from '../../../hooks/redux';
-import { onekeyBleConnect } from '../../../utils/ble/BleOnekeyConnect';
+import { onekeyBleConnect } from '@onekeyhq/kit/src/utils/device/ble/BleOnekeyConnect';
+import { IOneKeyDeviceFeatures } from '@onekeyhq/shared/types';
 
 type NavigationProps = ModalScreenProps<RootRoutesParams>;
 
@@ -30,60 +35,49 @@ const DeviceStatusCheckModal: FC = () => {
   const intl = useIntl();
   const navigation = useNavigation<NavigationProps['navigation']>();
   const { device } = useRoute<RouteProps>().params;
-  const { network } = useActiveWalletAccount();
-  const { engine } = backgroundApiProxy;
+  const { serviceAccount } = backgroundApiProxy;
+
+  const safeGoBack = useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    }
+  }, [navigation]);
 
   useEffect(() => {
-    // Check device status
+    const timeId = setTimeout(() => {
+      safeGoBack();
+      ToastManager.show({
+        title: intl.formatMessage({ id: 'action__connection_timeout' }),
+      });
+    }, 60 * 1000);
+    return () => {
+      clearTimeout(timeId);
+    };
+  }, [safeGoBack, intl]);
 
+  useEffect(() => {
     // If device and account are ready, go to success page
     async function main() {
-      const features = await onekeyBleConnect.getFeatures(device.device);
-
-      if (!features) return; // error
-      if (!network) return; // error
-
-      await engine.upsertDevice(features, device.device.id);
-
-      if (features.initialized) {
-        let wallet = null;
-        let account = null;
-        try {
-          wallet = await engine.createHWWallet();
-          const accounts = await engine.addHDAccounts(
-            'Undefined',
-            wallet.id,
-            network.id,
-          );
-          if (accounts.length > 0) {
-            const $account = accounts[0];
-            account = $account;
-            console.log(account);
-          }
-        } catch (e) {
-          console.log(e);
-        }
-
-        // serviceAccount.changeActiveAccount({
-        //   account,
-        //   wallet,
-        // });
-
-        if (navigation.canGoBack()) {
-          navigation.goBack();
-        }
-        navigation.navigate(RootRoutes.Modal, {
-          screen: ModalRoutes.CreateWallet,
-          params: {
-            screen: CreateWalletModalRoutes.SetupSuccessModal,
-            params: { device },
-          },
+      let features: IOneKeyDeviceFeatures | null = null;
+      try {
+        // 10s timeout for device connection
+        const result = await Promise.race([
+          onekeyBleConnect.getFeatures({
+            ...device.device,
+            deviceType: device.type,
+          } as any),
+          new Promise((resolve, reject) => setTimeout(reject, 30 * 1000)),
+        ]);
+        features = result as IOneKeyDeviceFeatures;
+      } catch (e) {
+        safeGoBack();
+        ToastManager.show({
+          title: intl.formatMessage({ id: 'action__connection_timeout' }),
         });
-      } else {
-        if (navigation.canGoBack()) {
-          navigation.goBack();
-        }
+        return;
+      }
 
+      if (!features.initialized) {
         navigation.navigate(RootRoutes.Modal, {
           screen: ModalRoutes.CreateWallet,
           params: {
@@ -93,7 +87,29 @@ const DeviceStatusCheckModal: FC = () => {
             },
           },
         });
+        return;
       }
+
+      try {
+        await serviceAccount.createHWWallet({
+          features,
+          bleUUID: device.device.id,
+        });
+      } catch (e: any) {
+        safeGoBack();
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+        ToastManager.show({ title: e?.message ?? '' });
+        return;
+      }
+
+      safeGoBack();
+      navigation.navigate(RootRoutes.Modal, {
+        screen: ModalRoutes.CreateWallet,
+        params: {
+          screen: CreateWalletModalRoutes.SetupSuccessModal,
+          params: { device },
+        },
+      });
     }
 
     main();

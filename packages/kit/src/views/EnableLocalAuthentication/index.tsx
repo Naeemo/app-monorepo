@@ -3,13 +3,12 @@ import React, { FC, useEffect } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { useIntl } from 'react-intl';
 
-import { Center, Modal, Spinner } from '@onekeyhq/components';
+import { Center, Modal, Spinner, useToast } from '@onekeyhq/components';
 
 import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
 import Protected from '../../components/Protected';
 import { useSettings } from '../../hooks/redux';
 import { useLocalAuthentication } from '../../hooks/useLocalAuthentication';
-import { useToast } from '../../hooks/useToast';
 import { toggleEnableLocalAuthentication } from '../../store/reducers/settings';
 
 type EnableLocalAuthenticationProps = {
@@ -36,7 +35,10 @@ const EnableLocalAuthenticationDone: FC<EnableLocalAuthenticationProps> = ({
           toast.show({
             title: intl.formatMessage({ id: 'msg__verification_failure' }),
           });
-          navigation?.goBack?.();
+          setTimeout(() => {
+            // delay 1000ms goBack, otherwise the keyboard will be showup
+            navigation?.goBack?.();
+          }, 1000);
           return;
         }
       }
@@ -59,7 +61,7 @@ const EnableLocalAuthenticationDone: FC<EnableLocalAuthenticationProps> = ({
 
 export const EnableLocalAuthentication = () => (
   <Modal footer={null}>
-    <Protected>
+    <Protected walletId={null}>
       {(password, { isLocalAuthentication }) => (
         <EnableLocalAuthenticationDone
           password={password}

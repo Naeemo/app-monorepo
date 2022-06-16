@@ -11,8 +11,7 @@ import {
 } from '@onekeyhq/components';
 
 import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
-import { useLocalAuthentication } from '../../hooks';
-import { useStatus } from '../../hooks/redux';
+import { useAppSelector, useLocalAuthentication } from '../../hooks';
 
 type FieldValues = {
   password: string;
@@ -28,7 +27,8 @@ type SetupProps = {
 const Setup: FC<SetupProps> = ({ onOk, skipSavePassword }) => {
   const intl = useIntl();
   const { isOk } = useLocalAuthentication();
-  const { boardingCompleted, authenticationType } = useStatus();
+  const boardingCompleted = useAppSelector((s) => s.status.boardingCompleted);
+  const authenticationType = useAppSelector((s) => s.status.authenticationType);
   const {
     control,
     handleSubmit,
@@ -39,7 +39,6 @@ const Setup: FC<SetupProps> = ({ onOk, skipSavePassword }) => {
     defaultValues: {
       password: '',
       confirmPassword: '',
-      withEnableAuthentication: true,
     },
   });
   const onSubmit = useCallback(
@@ -61,6 +60,7 @@ const Setup: FC<SetupProps> = ({ onOk, skipSavePassword }) => {
   return (
     <KeyboardDismissView px={{ base: 4, md: 0 }}>
       <Typography.DisplayLarge textAlign="center" mb={2}>
+        🔐{' '}
         {intl.formatMessage({
           id: 'title__set_password',
           defaultMessage: 'Set Password',
@@ -141,7 +141,11 @@ const Setup: FC<SetupProps> = ({ onOk, skipSavePassword }) => {
           />
         </Form.Item>
         {isOk ? (
-          <Form.Item name="withEnableAuthentication" control={control}>
+          <Form.Item
+            name="withEnableAuthentication"
+            defaultValue={isOk}
+            control={control}
+          >
             <Form.CheckBox
               title={intl.formatMessage(
                 { id: 'content__authentication_with' },

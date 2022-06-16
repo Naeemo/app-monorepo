@@ -15,6 +15,7 @@ import { ButtonType } from '@onekeyhq/components/src/Button';
 import { OnekeyLiteResetRoutesParams } from '@onekeyhq/kit/src/routes';
 import { ModalScreenProps } from '@onekeyhq/kit/src/routes/types';
 
+import { SkipAppLock } from '../../../../components/AppLock';
 import HardwareConnect, { OperateType } from '../../BaseConnect';
 import ErrorDialog from '../ErrorDialog';
 
@@ -24,7 +25,9 @@ const Reset: FC = () => {
   const intl = useIntl();
   const navigation = useNavigation<NavigationProps['navigation']>();
 
-  const [title] = useState('Onekey Lite');
+  const [title] = useState(
+    intl.formatMessage({ id: 'app__hardware_name_onekey_lite' }),
+  );
   const [actionPressStyle, setActionPressStyle] =
     useState<ButtonType>('primary');
   const [actionPressContent, setActionPressContent] = useState(
@@ -38,6 +41,11 @@ const Reset: FC = () => {
   );
   const [operateType, setOperateType] = useState<OperateType>('guide');
   const [errorCode, setErrorCode] = useState(0);
+
+  const goBack = () => {
+    const inst = navigation.getParent() || navigation;
+    inst.goBack();
+  };
 
   const stateNfcSearch = () => {
     setActionPressStyle('basic');
@@ -103,11 +111,11 @@ const Reset: FC = () => {
       case 'transfer':
         if (Platform.OS === 'ios') return;
         OnekeyLite.cancel();
-        navigation.goBack();
+        goBack();
         break;
 
       default:
-        navigation.goBack();
+        goBack();
         break;
     }
   };
@@ -144,6 +152,7 @@ const Reset: FC = () => {
 
   return (
     <>
+      <SkipAppLock />
       <HardwareConnect
         title={title}
         connectType="ble"
@@ -159,11 +168,11 @@ const Reset: FC = () => {
         code={errorCode}
         onRetryConnect={startNfcScan}
         onExit={() => {
-          navigation.goBack();
+          goBack();
         }}
         onIntoNfcSetting={() => {
           OnekeyLite.intoSetting();
-          navigation.goBack();
+          goBack();
         }}
         onDialogClose={() => setErrorCode(0)}
       />

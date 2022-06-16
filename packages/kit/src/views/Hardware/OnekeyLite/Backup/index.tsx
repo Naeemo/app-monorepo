@@ -11,15 +11,17 @@ import {
   CallbackError,
   CardInfo,
 } from '@onekeyhq/app/src/hardware/OnekeyLite/types';
+import { useToast } from '@onekeyhq/components';
 import { ButtonType } from '@onekeyhq/components/src/Button';
 import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
-import { useToast } from '@onekeyhq/kit/src/hooks';
 import {
   CreateWalletModalRoutes,
   CreateWalletRoutesParams,
 } from '@onekeyhq/kit/src/routes';
+import { ModalScreenProps } from '@onekeyhq/kit/src/routes/types';
 import { updateWallet } from '@onekeyhq/kit/src/store/reducers/runtime';
 
+import { SkipAppLock } from '../../../../components/AppLock';
 import HardwareConnect, { OperateType } from '../../BaseConnect';
 import ErrorDialog from '../ErrorDialog';
 
@@ -27,16 +29,21 @@ type RouteProps = RouteProp<
   CreateWalletRoutesParams,
   CreateWalletModalRoutes.OnekeyLiteBackupModal
 >;
+
+type NavigationProps = ModalScreenProps<CreateWalletRoutesParams>;
+
 const Backup: FC = () => {
   const intl = useIntl();
   const toast = useToast();
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProps['navigation']>();
   const { dispatch } = backgroundApiProxy;
-  const { walletId, pwd, backupData, onRetry, onSuccess } =
+  const { walletId, pinCode, backupData, onSuccess } =
     useRoute<RouteProps>().params;
 
   const [pinRetryCount, setPinRetryCount] = useState('');
-  const [title] = useState('Onekey Lite');
+  const [title] = useState(
+    intl.formatMessage({ id: 'app__hardware_name_onekey_lite' }),
+  );
   const [actionPressStyle, setActionPressStyle] =
     useState<ButtonType>('primary');
   const [actionPressContent, setActionPressContent] = useState(
@@ -50,6 +57,11 @@ const Backup: FC = () => {
   );
   const [operateType, setOperateType] = useState<OperateType>('guide');
   const [errorCode, setErrorCode] = useState(0);
+
+  const goBack = () => {
+    const inst = navigation.getParent() || navigation;
+    inst.goBack();
+  };
 
   const stateNfcSearch = () => {
     setActionPressStyle('basic');
@@ -92,7 +104,7 @@ const Backup: FC = () => {
     OnekeyLite.cancel();
     OnekeyLite.setMnemonic(
       backupData,
-      pwd,
+      pinCode,
       async (error: CallbackError, data: boolean | null, state: CardInfo) => {
         console.log('state', state);
         if (data) {
@@ -131,11 +143,11 @@ const Backup: FC = () => {
       case 'transfer':
         if (Platform.OS === 'ios') return;
         OnekeyLite.cancel();
-        navigation.goBack();
+        goBack();
         break;
 
       default:
-        navigation.goBack();
+        goBack();
         break;
     }
   };
@@ -172,6 +184,7 @@ const Backup: FC = () => {
 
   return (
     <>
+      <SkipAppLock />
       <HardwareConnect
         title={title}
         connectType="ble"
@@ -186,18 +199,25 @@ const Backup: FC = () => {
       <ErrorDialog
         code={errorCode}
         pinRetryCount={pinRetryCount}
-        onRetry={() => {
-          onRetry?.();
-        }}
+        onRetry={() =>
+          navigation.replace(
+            CreateWalletModalRoutes.OnekeyLiteBackupPinCodeVerifyModal,
+            {
+              walletId,
+              backupData,
+              onSuccess,
+            },
+          )
+        }
         onRetryConnect={() => {
           startNfcScan(true);
         }}
         onExit={() => {
-          navigation.goBack();
+          goBack();
         }}
         onIntoNfcSetting={() => {
           OnekeyLite.intoSetting();
-          navigation.goBack();
+          goBack();
         }}
         onDialogClose={() => setErrorCode(0)}
       />

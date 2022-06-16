@@ -2,12 +2,17 @@ import React, { FC, useEffect } from 'react';
 
 import { useIntl } from 'react-intl';
 
-import { Dialog, Form, useForm } from '@onekeyhq/components';
+import {
+  Dialog,
+  Form,
+  useForm,
+  useIsVerticalLayout,
+  useToast,
+} from '@onekeyhq/components';
 import DialogCommon from '@onekeyhq/components/src/Dialog/components';
 import { Account } from '@onekeyhq/engine/src/types/account';
 
 import backgroundApiProxy from '../../../background/instance/backgroundApiProxy';
-import { useToast } from '../../../hooks/useToast';
 
 type FieldValues = { name: string };
 
@@ -15,7 +20,7 @@ export type AccountModifyNameDialogProps = {
   visible: boolean;
   account: Account | undefined;
   onDone: (account: Account) => void;
-  onClose: () => void;
+  onClose?: () => void;
 };
 
 const AccountModifyNameDialog: FC<AccountModifyNameDialogProps> = ({
@@ -29,6 +34,7 @@ const AccountModifyNameDialog: FC<AccountModifyNameDialogProps> = ({
   const { serviceAccount } = backgroundApiProxy;
 
   const [isLoading, setIsLoading] = React.useState(false);
+  const isSmallScreen = useIsVerticalLayout();
 
   const { control, handleSubmit, setError, reset } = useForm<FieldValues>({
     defaultValues: { name: '' },
@@ -51,7 +57,7 @@ const AccountModifyNameDialog: FC<AccountModifyNameDialogProps> = ({
 
     if (changedAccount) {
       toast.show({ title: intl.formatMessage({ id: 'msg__renamed' }) });
-      onClose();
+      onClose?.();
       onDone(account);
     } else {
       setError('name', {
@@ -84,6 +90,7 @@ const AccountModifyNameDialog: FC<AccountModifyNameDialogProps> = ({
               }}
             >
               <Form.Input
+                size={isSmallScreen ? 'xl' : 'default'}
                 autoFocus
                 focusable
                 placeholder={account?.name ?? ''}
@@ -92,7 +99,7 @@ const AccountModifyNameDialog: FC<AccountModifyNameDialogProps> = ({
             <DialogCommon.FooterButton
               marginTop={0}
               secondaryActionTranslationId="action__cancel"
-              onSecondaryActionPress={() => onClose()}
+              onSecondaryActionPress={() => onClose?.()}
               onPrimaryActionPress={() => onSubmit()}
               primaryActionTranslationId="action__rename"
               primaryActionProps={{

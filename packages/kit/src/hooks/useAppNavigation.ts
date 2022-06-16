@@ -18,7 +18,7 @@ export default function useAppNavigation() {
 
 export function navigationGoHomeForceReload() {
   const navigation = getAppNavigation();
-  if (platformEnv.isBrowser && !platformEnv.isExtensionBackground) {
+  if (platformEnv.isRuntimeBrowser && !platformEnv.isExtensionBackground) {
     // navigate() not working
     navigation.navigate(RootRoutes.Root);
     window.location.href = '#/';
@@ -31,6 +31,13 @@ export function navigationGoHomeForceReload() {
   }
 }
 
+/**
+ * - rootNavigation / selfNavigation
+ * - goBack in self
+ * - goBack in parent
+ * - goBack to home
+ * - goBack to home with reload
+ */
 export function navigationGoBack() {
   const navigation = getAppNavigation();
   if (navigation.canGoBack()) {

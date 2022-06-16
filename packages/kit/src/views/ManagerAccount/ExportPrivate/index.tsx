@@ -10,6 +10,7 @@ import {
   QRCode,
   Text,
   useIsVerticalLayout,
+  useToast,
 } from '@onekeyhq/components';
 import { copyToClipboard } from '@onekeyhq/components/src/utils/ClipboardUtils';
 import { Account as AccountEngineType } from '@onekeyhq/engine/src/types/account';
@@ -20,7 +21,6 @@ import {
 } from '@onekeyhq/kit/src/routes/Modal/ManagerAccount';
 
 import backgroundApiProxy from '../../../background/instance/backgroundApiProxy';
-import { useToast } from '../../../hooks/useToast';
 
 type NavigationProps = RouteProp<
   ManagerAccountRoutesParams,
@@ -73,8 +73,8 @@ const ExportPrivateViewModal = () => {
           <Box flex={1} justifyContent="center" flexDirection="column">
             <Box alignItems="center" flexDirection="column">
               <Box
-                borderRadius="3xl"
-                bgColor="white"
+                borderRadius="24px"
+                bgColor="#FFFFFF"
                 p={isSmallScreen ? '16px' : '11px'}
                 shadow="depth.4"
               >

@@ -25,7 +25,6 @@ import appStorage, {
 } from '@onekeyhq/shared/src/storage/appStorage';
 
 import { IBackgroundApi } from '../background/IBackgroundApi';
-import { ensureBackgroundObject } from '../background/utils';
 
 import middlewares from './middlewares';
 import autoUpdateReducer from './reducers/autoUpdater';
@@ -38,7 +37,7 @@ import runtimeReducer from './reducers/runtime';
 import settingsReducer from './reducers/settings';
 import statusReducer from './reducers/status';
 import swapReducer from './reducers/swap';
-import tokensRecuder from './reducers/tokens';
+import tokensReducer from './reducers/tokens';
 
 const allReducers = combineReducers({
   autoUpdate: autoUpdateReducer,
@@ -51,7 +50,7 @@ const allReducers = combineReducers({
   data: dataReducer,
   discover: discoverReducer,
   swap: swapReducer,
-  tokens: tokensRecuder,
+  tokens: tokensReducer,
 });
 
 function rootReducer(reducers: Reducer, initialState = {}): any {
@@ -93,7 +92,9 @@ export function makeStore() {
       getDefaultMiddleware({
         serializableCheck: {
           ignoredActions: [FLUSH, REHYDRATE, PAUSE, PERSIST, PURGE, REGISTER],
+          warnAfter: 128,
         },
+        immutableCheck: { warnAfter: 128 },
       }).concat(middlewares),
   });
   const persistor = persistStore(store);
@@ -102,7 +103,8 @@ export function makeStore() {
 
 const { store, persistor: persistorStore } = makeStore();
 
-export const persistor = ensureBackgroundObject(persistorStore);
+// export const persistor = ensureBackgroundObject(persistorStore);
+export const persistor = persistorStore;
 
 export type IAppState = ReturnType<typeof store.getState>;
 

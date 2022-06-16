@@ -1,25 +1,23 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 
-import { Box } from '@onekeyhq/components';
-
-import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
-import { useActiveWalletAccount } from '../../hooks/redux';
-import { reset } from '../../store/reducers/swap';
+import { ScrollView } from '@onekeyhq/components';
 
 import SwapContent from './SwapContent';
+import SwapGuard from './SwapGuard';
 import SwapHeader from './SwapHeader';
+import SwapItems from './SwapItems';
+import SwapTransactions from './SwapTransactions';
+import SwapUpdator from './SwapUpdator';
 
-const Swap = () => {
-  const { network, account } = useActiveWalletAccount();
-  useEffect(() => {
-    backgroundApiProxy.dispatch(reset());
-  }, [network, account]);
-  return (
-    <Box>
-      <SwapHeader />
-      <SwapContent />
-    </Box>
-  );
-};
+const Swap = () => (
+  <ScrollView>
+    <SwapHeader />
+    <SwapGuard />
+    <SwapTransactions />
+    <SwapContent />
+    <SwapItems />
+    <SwapUpdator />
+  </ScrollView>
+);
 
 export default Swap;

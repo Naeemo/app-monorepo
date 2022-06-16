@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unused-vars */
-import React, { useEffect, useState } from 'react';
+import React, { ComponentProps, useEffect, useState } from 'react';
 
 import {
   IWebViewWrapperRef,
@@ -24,6 +24,7 @@ function WebView({
   onWebViewRef,
   onNavigationStateChange,
   allowpopups = false,
+  containerProps,
 }: {
   src: string;
   onSrcChange?: (src: string) => void;
@@ -31,6 +32,7 @@ function WebView({
   onWebViewRef?: (ref: IWebViewWrapperRef | null) => void;
   onNavigationStateChange?: (event: any) => void;
   allowpopups?: boolean;
+  containerProps?: ComponentProps<typeof Box>;
 }): JSX.Element {
   const isFocused = useIsFocused();
   const { jsBridge, webviewRef, setWebViewRef } = useWebViewBridge();
@@ -54,13 +56,14 @@ function WebView({
     // connect background jsBridge
     backgroundApiProxy.connectBridge(jsBridge);
 
-    // Native App needs instance notify
-    if (platformEnv.isNative || platformEnv.isDesktop) {
+    // Native App needs notify immediately
+    if (platformEnv.isNative) {
       debugLogger.webview('webview notify changed events1', src);
       backgroundApiProxy.serviceAccount.notifyAccountsChanged();
       backgroundApiProxy.serviceNetwork.notifyChainChanged();
     }
 
+    // TODO use webview dom-ready event: https://github.com/electron/electron/blob/main/docs/api/webview-tag.md#methods
     // Desktop needs timeout wait for webview DOM ready
     //  FIX: Error: The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.
     const timer = setTimeout(() => {
@@ -87,7 +90,7 @@ function WebView({
   }
 
   return (
-    <Box flex={1} bg="background-default">
+    <Box flex={1} bg="background-default" {...containerProps}>
       <Box flex={1}>
         {webviewVisible && src && (
           <InpageProviderWebView

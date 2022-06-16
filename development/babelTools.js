@@ -6,26 +6,51 @@ function fullPath(pathStr) {
   return path.resolve(__dirname, pathStr);
 }
 
+const moduleResolverAliasForAllWebPlatform = {
+  // * remote connection disallowed in ext
+  'console-feed': fullPath('./module-resolver/console-feed-mock'),
+  // * cause firefox popup resize issue
+  'react-native-restart': fullPath(
+    './module-resolver/react-native-restart-mock',
+  ),
+  'react-native-fast-image': fullPath(
+    './module-resolver/react-native-fast-image-mock',
+  ),
+  'react-native-keyboard-manager': fullPath(
+    './module-resolver/react-native-keyboard-manager-mock',
+  ),
+};
+
 function normalizeConfig({ platform, config }) {
+  process.env.ONEKEY_PLATFORM = platform;
   let moduleResolver = null;
   if (platform === developmentConsts.platforms.ext) {
     moduleResolver = {
-      // root: [],
       alias: {
-        // * remote connection disallowed in ext
-        'console-feed': fullPath('./module-resolver/console-feed-mock'),
-        // * cause firefox popup resize issue
-        'react-native-restart': fullPath(
-          './module-resolver/react-native-restart-mock',
-        ),
+        ...moduleResolverAliasForAllWebPlatform,
+      },
+    };
+  }
+  if (platform === developmentConsts.platforms.web) {
+    moduleResolver = {
+      alias: {
+        ...moduleResolverAliasForAllWebPlatform,
+      },
+    };
+  }
+  if (platform === developmentConsts.platforms.desktop) {
+    moduleResolver = {
+      alias: {
+        ...moduleResolverAliasForAllWebPlatform,
       },
     };
   }
   if (platform === developmentConsts.platforms.app) {
     moduleResolver = {
-      root: ['./'],
       alias: {
-        '@onekeyfe/connect': './src/public/static/connect/index.js',
+        '@onekeyfe/js-sdk': fullPath(
+          '../node_modules/@onekeyfe/js-sdk/dist/js-sdk-native',
+        ),
       },
     };
   }
@@ -43,6 +68,12 @@ function normalizeConfig({ platform, config }) {
           'REMOTE_CONSOLE_SERVER',
           'VERSION',
           'BUILD_NUMBER',
+          'ONEKEY_PLATFORM',
+          'EXT_CHANNEL',
+          'ANDROID_CHANNEL',
+          'OPENSEA_KEY',
+          'COVALENT_KEY',
+          'MOONPAY_KEY',
         ],
       },
     ],

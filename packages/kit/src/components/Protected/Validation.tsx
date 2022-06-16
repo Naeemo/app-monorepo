@@ -1,4 +1,5 @@
-import React, { FC, useCallback } from 'react';
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
+import React, { FC, useCallback, useEffect, useRef } from 'react';
 
 import { useIntl } from 'react-intl';
 
@@ -10,26 +11,33 @@ import {
   Typography,
   useForm,
 } from '@onekeyhq/components';
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
 import backgroundApiProxy from '../../background/instance/backgroundApiProxy';
 import { useSettings } from '../../hooks/redux';
+import { hasHardwareSupported } from '../../utils/localAuthentication';
 import LocalAuthenticationButton from '../LocalAuthenticationButton';
+
+import { ValidationFields } from './types';
 
 type FieldValues = { password: string };
 
 type ValidationProps = {
+  field?: ValidationFields;
   onOk?: (text: string, isLocalAuthentication?: boolean) => void;
 };
 
-const Validation: FC<ValidationProps> = ({ onOk }) => {
-  const { serviceApp } = backgroundApiProxy;
+const Validation: FC<ValidationProps> = ({ onOk, field }) => {
   const intl = useIntl();
-  const { enableLocalAuthentication } = useSettings();
+  const ref = useRef<any>();
+  const { enableLocalAuthentication, validationState = {} } = useSettings();
   const { control, handleSubmit, setError } = useForm<FieldValues>({
     defaultValues: { password: '' },
   });
   const onSubmit = handleSubmit(async (values: FieldValues) => {
-    const isOk = await serviceApp.verifyPassword(values.password);
+    const isOk = await backgroundApiProxy.serviceApp.verifyPassword(
+      values.password,
+    );
     if (isOk) {
       onOk?.(values.password, false);
     } else {
@@ -45,6 +53,31 @@ const Validation: FC<ValidationProps> = ({ onOk }) => {
     },
     [onOk],
   );
+
+  useEffect(() => {
+    if (!enableLocalAuthentication) {
+      // https://stackoverflow.com/questions/42456069/how-to-open-keyboard-automatically-in-react-native
+      // use setTimeout hack android platform
+      if (platformEnv.isNativeAndroid) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+        setTimeout(() => ref.current?.focus(), 100);
+      } else {
+        ref.current?.focus();
+      }
+      return;
+    }
+    hasHardwareSupported().then((isOk) => {
+      if (!isOk || !field || validationState[field] === false) {
+        if (platformEnv.isNativeAndroid) {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+          setTimeout(() => ref.current?.focus(), 100);
+        } else {
+          ref.current?.focus();
+        }
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <KeyboardDismissView px={{ base: 4, md: 0 }}>
@@ -80,7 +113,7 @@ const Validation: FC<ValidationProps> = ({ onOk }) => {
           }}
         >
           <Form.PasswordInput
-            autoFocus
+            ref={ref}
             // press enter key to submit
             onSubmitEditing={onSubmit}
           />
@@ -92,11 +125,12 @@ const Validation: FC<ValidationProps> = ({ onOk }) => {
           })}
         </Button>
       </Form>
-      {enableLocalAuthentication && (
-        <Center mt="8">
-          <LocalAuthenticationButton onOk={onLocalAuthenticationOk} />
-        </Center>
-      )}
+      <Center mt="8">
+        <LocalAuthenticationButton
+          onOk={onLocalAuthenticationOk}
+          field={field}
+        />
+      </Center>
     </KeyboardDismissView>
   );
 };

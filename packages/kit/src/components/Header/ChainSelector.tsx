@@ -11,6 +11,7 @@ import {
   Select,
   Token,
   Typography,
+  useIsVerticalLayout,
   useUserDevice,
 } from '@onekeyhq/components';
 import { Network } from '@onekeyhq/engine/src/types/network';
@@ -38,6 +39,7 @@ const ChainSelector: FC = () => {
 
   const { enabledNetworks } = useManageNetworks();
   const { network: activeNetwork } = useActiveWalletAccount();
+  const isVerticalLayout = useIsVerticalLayout();
 
   const { screenWidth } = useUserDevice();
   const handleActiveChainChange = useCallback(
@@ -66,9 +68,12 @@ const ChainSelector: FC = () => {
     <Box>
       <Select
         setPositionOnlyMounted
-        positionTranslateY={8}
-        dropdownPosition="right"
-        dropdownProps={{ w: '64' }}
+        positionTranslateY={-4}
+        dropdownPosition="top-left"
+        dropdownProps={{
+          minW: '240px',
+          height: isVerticalLayout ? '70%' : '320px',
+        }}
         value={activeNetwork ? activeNetwork?.id : undefined}
         onChange={handleActiveChainChange}
         title={intl.formatMessage({ id: 'network__networks' })}
@@ -101,7 +106,7 @@ const ChainSelector: FC = () => {
             }
             borderRadius="xl"
             alignItems="center"
-            justifyContent="flex-end"
+            justifyContent={isVerticalLayout ? 'flex-end' : 'space-between'}
           >
             <HStack space={3} alignItems="center">
               <Token size={6} {...activeOption.tokenProps} />

@@ -7,11 +7,17 @@ import {
   updateWallet,
   updateWallets,
 } from '@onekeyhq/kit/src/store/reducers/runtime';
+import {
+  setEnableAppLock,
+  setRefreshTS,
+} from '@onekeyhq/kit/src/store/reducers/settings';
+import { randomAvatar } from '@onekeyhq/kit/src/utils/emojiUtils';
+import { IOneKeyDeviceFeatures } from '@onekeyhq/shared/types';
 
-import { unlock as mUnlock, passwordSet } from '../../store/reducers/data';
+import { passwordSet, release } from '../../store/reducers/data';
 import { changeActiveAccount } from '../../store/reducers/general';
-import { setEnableAppLock } from '../../store/reducers/settings';
 import { setBoardingCompleted, unlock } from '../../store/reducers/status';
+import { Avatar } from '../../utils/emojiUtils';
 import { backgroundClass, backgroundMethod } from '../decorators';
 import ProviderApiBase from '../providers/ProviderApiBase';
 
@@ -89,7 +95,7 @@ class ServiceAccount extends ServiceBase {
         wallet.accounts,
         activeNetworkId,
       );
-      accountId = account?.[0].id ?? null;
+      accountId = account?.[0]?.id ?? null;
     }
     serviceAccount.changeActiveAccount({
       accountId,
@@ -122,7 +128,10 @@ class ServiceAccount extends ServiceBase {
     if (!previousWalletId || !isValidNetworkId) {
       const defaultWallet =
         wallets.find(($wallet) => $wallet.accounts.length > 0) ?? null;
-      return defaultWallet?.id ?? null;
+      // HD or HW wallet with no accounts
+      const noAccountsHDHWWallets =
+        wallets.find((wallet) => ['hw', 'hd'].includes(wallet.type)) ?? null;
+      return defaultWallet?.id ?? noAccountsHDHWWallets?.id ?? null;
     }
     return previousWalletId;
   }
@@ -138,10 +147,21 @@ class ServiceAccount extends ServiceBase {
     let account: Account | null = null;
     if (wallet) {
       account = await engine.getAccount(wallet.accounts?.[0], activeNetworkId);
-    } else if (wallets.length > 0) {
-      const $wallet = wallets[0];
-      wallet = $wallet;
+    } else {
+      wallet =
+        wallets.find(($wallet) => ['hw', 'hd'].includes($wallet.type)) ?? null;
+
+      if (!wallet) {
+        // Check for imported wallets
+        wallet =
+          wallets
+            .filter(($wallet) => $wallet.accounts.length > 0)
+            .find(($wallet) =>
+              ['imported', 'watching'].includes($wallet.type),
+            ) ?? null;
+      }
     }
+
     serviceAccount.changeActiveAccount({
       accountId: account?.id ?? null,
       walletId: wallet?.id ?? null,
@@ -152,13 +172,19 @@ class ServiceAccount extends ServiceBase {
   async createHDWallet({
     password,
     mnemonic,
+    avatar,
   }: {
     password: string;
     mnemonic?: string;
+    avatar?: Avatar;
   }) {
-    const { dispatch, engine, serviceAccount, appSelector } =
+    const { dispatch, engine, appSelector, serviceAccount } =
       this.backgroundApi;
-    const wallet = await engine.createHDWallet(password, mnemonic);
+    const wallet = await engine.createHDWallet({
+      password,
+      mnemonic,
+      avatar: avatar ?? randomAvatar(),
+    });
     const data: { isPasswordSet: boolean } = appSelector((s) => s.data);
     const status: { boardingCompleted: boolean } = appSelector((s) => s.status);
     if (!status.boardingCompleted) {
@@ -169,14 +195,10 @@ class ServiceAccount extends ServiceBase {
       dispatch(setEnableAppLock(true));
     }
     dispatch(unlock());
-    dispatch(mUnlock());
+    dispatch(release());
 
-    await this.initWallets();
-    const accountId = wallet.accounts?.[0] ?? null;
-    serviceAccount.changeActiveAccount({
-      accountId,
-      walletId: wallet.id,
-    });
+    await serviceAccount.initWallets();
+    await serviceAccount.autoChangeAccount({ walletId: wallet.id });
     return wallet;
   }
 
@@ -189,7 +211,7 @@ class ServiceAccount extends ServiceBase {
     name?: string[],
   ) {
     const { engine, dispatch } = this.backgroundApi;
-    const accounts = await engine.addHDAccounts(
+    const accounts = await engine.addHdOrHwAccounts(
       password,
       walletId,
       networkId,
@@ -238,7 +260,7 @@ class ServiceAccount extends ServiceBase {
       dispatch(setEnableAppLock(true));
     }
     dispatch(unlock());
-    dispatch(mUnlock());
+    dispatch(release());
 
     const wallets = await serviceAccount.initWallets();
     const watchedWallet = wallets.find((wallet) => wallet.type === 'imported');
@@ -269,7 +291,7 @@ class ServiceAccount extends ServiceBase {
       dispatch(setBoardingCompleted());
     }
     dispatch(unlock());
-    dispatch(mUnlock());
+    dispatch(release());
 
     const wallets = await serviceAccount.initWallets();
     const watchedWallet = wallets.find((wallet) => wallet.type === 'watching');
@@ -289,6 +311,68 @@ class ServiceAccount extends ServiceBase {
   }
 
   @backgroundMethod()
+  async createHWWallet({
+    features,
+    avatar,
+    bleUUID,
+  }: {
+    features: IOneKeyDeviceFeatures;
+    avatar?: Avatar;
+    bleUUID: string;
+  }) {
+    const { dispatch, engine, serviceAccount, appSelector } =
+      this.backgroundApi;
+    const networkId = appSelector((s) => s.general.activeNetworkId);
+    const wallets: Wallet[] = appSelector((s) => s.runtime.wallets);
+    let wallet = null;
+    let account = null;
+
+    await engine.upsertDevice(features, bleUUID);
+    const deviceId = features.onekey_serial ?? features.serial_no ?? '';
+
+    // ignore duplicate wallet toast when current hardware does not have accounts.
+    const walletExistButNoAccount = wallets.find((w) => {
+      const targetWallet = w.associatedDevice === deviceId;
+      if (!targetWallet) return false;
+      if (!w.accounts.length) return true;
+      return false;
+    });
+    if (walletExistButNoAccount) {
+      wallet = walletExistButNoAccount;
+    } else {
+      wallet = await engine.createHWWallet({
+        avatar: avatar ?? randomAvatar(),
+        features,
+      });
+    }
+
+    const accounts = await engine.addHdOrHwAccounts(
+      'Undefined',
+      wallet.id,
+      networkId,
+    );
+
+    if (accounts.length > 0) {
+      const $account = accounts[0];
+      account = $account;
+    }
+
+    const status: { boardingCompleted: boolean } = appSelector((s) => s.status);
+    if (!status.boardingCompleted) {
+      dispatch(setBoardingCompleted());
+    }
+    dispatch(unlock());
+    dispatch(release());
+
+    await this.initWallets();
+    serviceAccount.changeActiveAccount({
+      accountId: account?.id ?? null,
+      walletId: wallet?.id ?? null,
+    });
+    return wallet;
+  }
+
+  @backgroundMethod()
   initCheckingAccount(accounts?: Account[]): string | null {
     if (!accounts) return null;
 
@@ -304,6 +388,41 @@ class ServiceAccount extends ServiceBase {
       return accounts[0]?.id ?? null;
     }
     return previousAccountId;
+  }
+
+  @backgroundMethod()
+  async removeWallet(walletId: string, password: string | undefined) {
+    const { appSelector, engine, dispatch } = this.backgroundApi;
+    const activeWalletId = appSelector((s) => s.general.activeWalletId);
+    await engine.removeWallet(walletId, password ?? '');
+
+    if (activeWalletId === walletId) {
+      await this.autoChangeWallet();
+    } else {
+      await this.initWallets();
+    }
+
+    dispatch(setRefreshTS());
+  }
+
+  @backgroundMethod()
+  async removeAccount(
+    walletId: string,
+    accountId: string,
+    password: string | undefined,
+  ) {
+    const { appSelector, engine, dispatch } = this.backgroundApi;
+    const activeAccountId = appSelector((s) => s.general.activeAccountId);
+    await engine.removeAccount(accountId, password ?? '');
+
+    if (activeAccountId === accountId) {
+      await this.autoChangeAccount({ walletId });
+    } else {
+      const wallet: Wallet | null = await engine.getWallet(walletId);
+      dispatch(updateWallet(wallet));
+    }
+
+    dispatch(setRefreshTS());
   }
 }
 

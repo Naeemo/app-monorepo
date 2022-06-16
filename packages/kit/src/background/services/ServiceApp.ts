@@ -2,13 +2,18 @@ import RNRestart from 'react-native-restart';
 
 import { setActiveIds } from '@onekeyhq/kit/src/store/reducers/general';
 import platformEnv from '@onekeyhq/shared/src/platformEnv';
+import appStorage from '@onekeyhq/shared/src/storage/appStorage';
 
-import { unlock as mUnlock, passwordSet } from '../../store/reducers/data';
+import { passwordSet, release } from '../../store/reducers/data';
 import {
   setEnableAppLock,
   setEnableLocalAuthentication,
 } from '../../store/reducers/settings';
-import { setBoardingCompleted, unlock } from '../../store/reducers/status';
+import {
+  lock,
+  setBoardingCompleted,
+  unlock,
+} from '../../store/reducers/status';
 import {
   getPassword,
   hasHardwareSupported,
@@ -37,7 +42,7 @@ class ServiceApp extends ServiceBase {
     if (platformEnv.isExtensionBackground) {
       return chrome.runtime.reload();
     }
-    if (platformEnv.isBrowser) {
+    if (platformEnv.isRuntimeBrowser) {
       return window?.location?.reload?.();
     }
   }
@@ -50,6 +55,10 @@ class ServiceApp extends ServiceBase {
     persistor.pause();
     await persistor.purge();
     await engine.resetApp();
+    if (platformEnv.isRuntimeBrowser) {
+      localStorage.clear();
+    }
+    await appStorage.clear();
     dispatch({ type: 'LOGOUT', payload: undefined });
     serviceNetwork.notifyChainChanged();
     serviceAccount.notifyAccountsChanged();
@@ -68,6 +77,7 @@ class ServiceApp extends ServiceBase {
     const { dispatch, serviceAccount, serviceNetwork } = this.backgroundApi;
     await this.initPassword();
     await this.initLocalAuthentication();
+    await this.initLock();
 
     const networks = await serviceNetwork.initNetworks();
     const wallets = await serviceAccount.initWallets();
@@ -78,8 +88,8 @@ class ServiceApp extends ServiceBase {
       activeWalletId,
       activeNetworkId,
     );
-
     const activeAccountId = serviceAccount.initCheckingAccount(accounts);
+
     dispatch(
       setActiveIds({
         activeAccountId,
@@ -87,6 +97,28 @@ class ServiceApp extends ServiceBase {
         activeNetworkId,
       }),
     );
+  }
+
+  @backgroundMethod()
+  async initLock() {
+    const { dispatch, appSelector, engine } = this.backgroundApi;
+    const {
+      enableAppLock,
+      appLockDuration,
+    }: { enableAppLock: boolean; appLockDuration: number } = appSelector(
+      (s) => s.settings,
+    );
+    const { lastActivity }: { lastActivity: number } = appSelector(
+      (s) => s.status,
+    );
+    const isPasswordSet = await engine.isMasterPasswordSet();
+    const prerequisites = isPasswordSet && enableAppLock;
+    if (!prerequisites) return;
+    const idleDuration = Math.floor((Date.now() - lastActivity) / (1000 * 60));
+    const isStale = idleDuration >= appLockDuration;
+    if (isStale) {
+      dispatch(lock());
+    }
   }
 
   @backgroundMethod()
@@ -117,6 +149,7 @@ class ServiceApp extends ServiceBase {
     const isMasterPasswordSet = await engine.isMasterPasswordSet();
     if (isMasterPasswordSet) {
       dispatch(passwordSet());
+      dispatch(setBoardingCompleted());
     }
   }
 
@@ -125,6 +158,7 @@ class ServiceApp extends ServiceBase {
     const { dispatch, engine, appSelector } = this.backgroundApi;
     await engine.updatePassword(oldPassword, newPassword);
     const data: { isPasswordSet: boolean } = appSelector((s) => s.data);
+    // TODO: Batch update in one action
     if (!data.isPasswordSet) {
       dispatch(passwordSet());
       dispatch(setEnableAppLock(true));
@@ -134,7 +168,7 @@ class ServiceApp extends ServiceBase {
       dispatch(setBoardingCompleted());
     }
     dispatch(unlock());
-    dispatch(mUnlock());
+    dispatch(release());
   }
 
   @backgroundMethod()

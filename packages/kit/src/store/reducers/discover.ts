@@ -56,6 +56,25 @@ function diffWebSite(
   return { title: newTitle, url: newUrl, favicon: newFavicon };
 }
 
+/**
+ * 校验域名
+ */
+function compareDomainNames(
+  hostname: string,
+  url: string | undefined,
+): boolean {
+  if (!url) {
+    return false;
+  }
+  try {
+    const urlObj = new URL(url);
+    const urlHostName = urlObj.hostname.toLowerCase();
+    return urlHostName === hostname;
+  } catch (error) {
+    return false;
+  }
+}
+
 export const discoverSlice = createSlice({
   name: 'discover',
   initialState,
@@ -115,20 +134,7 @@ export const discoverSlice = createSlice({
       }
       if (!hostname) return;
 
-      let url = hostname;
-      if (url.startsWith('www.')) {
-        url = url.replace('www.', '');
-      }
-      if (url.startsWith('m.')) {
-        url = url.replace('m.', '');
-      }
-
-      if (
-        action.payload.webSite.url &&
-        action.payload.webSite.url.indexOf(url) === -1
-      ) {
-        return;
-      }
+      if (!compareDomainNames(hostname, action.payload.webSite.url)) return;
 
       const history = state.history[hostname];
       if (history && history.webSite) {

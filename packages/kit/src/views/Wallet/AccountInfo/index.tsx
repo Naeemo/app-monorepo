@@ -7,13 +7,14 @@ import { useIntl } from 'react-intl';
 
 import {
   Box,
-  Button,
   Icon,
   IconButton,
   Pressable,
   Typography,
-  useIsVerticalLayout,
+  useIsSmallLayout,
+  useToast,
 } from '@onekeyhq/components';
+import Skeleton from '@onekeyhq/components/src/Skeleton';
 import { Text } from '@onekeyhq/components/src/Typography';
 import { shortenAddress } from '@onekeyhq/components/src/utils';
 import { copyToClipboard } from '@onekeyhq/components/src/utils/ClipboardUtils';
@@ -21,9 +22,13 @@ import {
   FormatBalance,
   FormatCurrency,
 } from '@onekeyhq/kit/src/components/Format';
-import { useActiveWalletAccount } from '@onekeyhq/kit/src/hooks/redux';
+import {
+  useActiveWalletAccount,
+  useFiatPay,
+} from '@onekeyhq/kit/src/hooks/redux';
+import { setHaptics } from '@onekeyhq/kit/src/hooks/setHaptics';
 import { useManageTokens } from '@onekeyhq/kit/src/hooks/useManageTokens';
-import { useToast } from '@onekeyhq/kit/src/hooks/useToast';
+import { FiatPayRoutes } from '@onekeyhq/kit/src/routes/Modal/FiatPay';
 import { ReceiveTokenRoutes } from '@onekeyhq/kit/src/routes/Modal/routes';
 import type { ReceiveTokenRoutesParams } from '@onekeyhq/kit/src/routes/Modal/types';
 import {
@@ -32,21 +37,23 @@ import {
   RootRoutes,
 } from '@onekeyhq/kit/src/routes/types';
 import extUtils from '@onekeyhq/kit/src/utils/extUtils';
+import {
+  SendRoutes,
+  SendRoutesParams,
+} from '@onekeyhq/kit/src/views/Send/types';
 import platformEnv from '@onekeyhq/shared/src/platformEnv';
-
-import { setHaptics } from '../../../hooks/setHaptics';
-import { SendRoutes, SendRoutesParams } from '../../Send/types';
 
 type NavigationProps = ModalScreenProps<ReceiveTokenRoutesParams> &
   ModalScreenProps<SendRoutesParams>;
 
-export const FIXED_VERTICAL_HEADER_HEIGHT = 258;
+export const FIXED_VERTICAL_HEADER_HEIGHT = 298;
 export const FIXED_HORIZONTAL_HEDER_HEIGHT = 214;
 
 type AccountAmountInfoProps = { isCenter: boolean };
 const AccountAmountInfo: FC<AccountAmountInfoProps> = ({ isCenter }) => {
   const intl = useIntl();
   const toast = useToast();
+
   const { account, network: activeNetwork } = useActiveWalletAccount();
   const { prices, balances } = useManageTokens({
     pollingInterval: 15000,
@@ -67,28 +74,36 @@ const AccountAmountInfo: FC<AccountAmountInfoProps> = ({ isCenter }) => {
         {intl.formatMessage({ id: 'asset__total_balance' }).toUpperCase()}
       </Typography.Subheading>
       <Box flexDirection="row" mt={2}>
-        <FormatBalance
-          balance={balances.main}
-          suffix={activeNetwork?.symbol?.toUpperCase?.()}
-          as={Typography.DisplayXLarge}
-          formatOptions={{
-            fixed: activeNetwork?.nativeDisplayDecimals ?? 6,
-          }}
-          render={(ele) => (
-            <Typography.DisplayXLarge>
-              {!balances.main ? '-' : ele}
-            </Typography.DisplayXLarge>
-          )}
-        />
-      </Box>
-      <FormatCurrency
-        numbers={[prices?.main, balances.main, !balances.main ? undefined : 1]}
-        render={(ele) => (
-          <Typography.Body2 mt={1}>
-            {!balances.main ? '-' : ele}
-          </Typography.Body2>
+        {balances.main ? (
+          <FormatBalance
+            balance={balances.main}
+            suffix={activeNetwork?.symbol?.toUpperCase?.()}
+            as={Typography.DisplayXLarge}
+            formatOptions={{
+              fixed: activeNetwork?.nativeDisplayDecimals ?? 6,
+            }}
+            render={(ele) => (
+              <Typography.DisplayXLarge>{ele}</Typography.DisplayXLarge>
+            )}
+          />
+        ) : (
+          <Skeleton shape="DisplayXLarge" />
         )}
-      />
+      </Box>
+      {prices.main && balances.main ? (
+        <FormatCurrency
+          numbers={[
+            prices?.main,
+            balances.main,
+            !balances.main ? undefined : 1,
+          ]}
+          render={(ele) => <Typography.Body2 mt={1}>{ele}</Typography.Body2>}
+        />
+      ) : (
+        <Box mt={1}>
+          <Skeleton shape="Body2" />
+        </Box>
+      )}
       <Pressable
         mt={4}
         onPress={() => {
@@ -123,53 +138,109 @@ const AccountAmountInfo: FC<AccountAmountInfoProps> = ({ isCenter }) => {
 };
 
 type AccountOptionProps = { isSmallView: boolean };
+
 const AccountOption: FC<AccountOptionProps> = ({ isSmallView }) => {
+  const { network: activeNetwork } = useActiveWalletAccount();
+  const currencies = useFiatPay(activeNetwork?.id ?? '');
   const intl = useIntl();
   const navigation = useNavigation<NavigationProps['navigation']>();
   const { wallet, account } = useActiveWalletAccount();
+
   return (
-    <Box flexDirection="row" justifyContent="center" alignItems="center">
-      <Button
-        size={isSmallView ? 'lg' : 'base'}
-        leftIconName="ArrowUpSolid"
-        minW={{ base: '126px', md: 'auto' }}
-        type="basic"
-        isDisabled={wallet?.type === 'watching' || !account}
-        onPress={() => {
-          navigation.navigate(RootRoutes.Modal, {
-            screen: ModalRoutes.Send,
-            params: {
-              screen: SendRoutes.Send,
-              params: {},
-            },
-          });
-        }}
-      >
-        {intl.formatMessage({ id: 'action__send' })}
-      </Button>
-      <Button
-        size={isSmallView ? 'lg' : 'base'}
-        ml={4}
-        leftIconName="ArrowDownSolid"
-        minW={{ base: '126px', md: 'auto' }}
-        type="basic"
-        isDisabled={wallet?.type === 'watching' || !account}
-        onPress={() => {
-          if (!account) return;
-          navigation.navigate(RootRoutes.Modal, {
-            screen: ModalRoutes.Receive,
-            params: {
-              screen: ReceiveTokenRoutes.ReceiveToken,
+    <Box flexDirection="row" px={{ base: 1, md: 0 }} mx={-3}>
+      <Box flex={{ base: 1, sm: 0 }} mx={3} minW="56px" alignItems="center">
+        <IconButton
+          circle
+          size={isSmallView ? 'xl' : 'lg'}
+          name="NavSendSolid"
+          type="basic"
+          isDisabled={wallet?.type === 'watching' || !account}
+          onPress={() => {
+            navigation.navigate(RootRoutes.Modal, {
+              screen: ModalRoutes.Send,
               params: {
-                address: account.address,
-                name: account.name,
+                screen: SendRoutes.PreSendToken,
+                params: {
+                  from: '',
+                  to: '',
+                  amount: '',
+                },
               },
-            },
-          });
-        }}
-      >
-        {intl.formatMessage({ id: 'action__receive' })}
-      </Button>
+            });
+          }}
+        />
+        <Typography.CaptionStrong
+          textAlign="center"
+          mt="8px"
+          color={
+            wallet?.type === 'watching' || !account
+              ? 'text-disabled'
+              : 'text-default'
+          }
+        >
+          {intl.formatMessage({ id: 'action__send' })}
+        </Typography.CaptionStrong>
+      </Box>
+      <Box flex={{ base: 1, sm: 0 }} mx={3} minW="56px" alignItems="center">
+        <IconButton
+          circle
+          size={isSmallView ? 'xl' : 'lg'}
+          name="NavReceiveSolid"
+          type="basic"
+          isDisabled={wallet?.type === 'watching' || !account}
+          onPress={() => {
+            navigation.navigate(RootRoutes.Modal, {
+              screen: ModalRoutes.Receive,
+              params: {
+                screen: ReceiveTokenRoutes.ReceiveToken,
+                params: {},
+              },
+            });
+          }}
+        />
+        <Typography.CaptionStrong
+          textAlign="center"
+          mt="8px"
+          color={
+            wallet?.type === 'watching' || !account
+              ? 'text-disabled'
+              : 'text-default'
+          }
+        >
+          {intl.formatMessage({ id: 'action__receive' })}
+        </Typography.CaptionStrong>
+      </Box>
+
+      {wallet?.type !== 'watching' && account && currencies.length !== 0 && (
+        <Box flex={{ base: 1, sm: 0 }} mx={3} minW="56px" alignItems="center">
+          <IconButton
+            circle
+            size={isSmallView ? 'xl' : 'lg'}
+            name="NavBuySolid"
+            type="basic"
+            onPress={() => {
+              if (!account) return;
+              navigation.navigate(RootRoutes.Modal, {
+                screen: ModalRoutes.FiatPay,
+                params: {
+                  screen: FiatPayRoutes.SupportTokenListModal,
+                  params: {
+                    networkId: activeNetwork?.id ?? '',
+                  },
+                },
+              });
+            }}
+          />
+          <Typography.CaptionStrong
+            textAlign="center"
+            mt="8px"
+            color="text-default"
+          >
+            {intl.formatMessage({ id: 'action__buy' })}
+          </Typography.CaptionStrong>
+        </Box>
+      )}
+
       {platformEnv.isExtensionUiPopup && platformEnv.isDev && (
         <IconButton
           onPress={() => {
@@ -184,13 +255,13 @@ const AccountOption: FC<AccountOptionProps> = ({ isSmallView }) => {
 };
 
 const AccountInfo = () => {
-  const isSmallView = useIsVerticalLayout();
+  const isSmallView = useIsSmallLayout();
   if (isSmallView) {
     return (
       <Box
-        py={8}
+        py="24px"
         w="100%"
-        px={4}
+        px="16px"
         flexDirection="column"
         bgColor="background-default"
         h={FIXED_VERTICAL_HEADER_HEIGHT}
@@ -206,7 +277,7 @@ const AccountInfo = () => {
     <Box
       h={FIXED_HORIZONTAL_HEDER_HEIGHT}
       py={12}
-      px={4}
+      px={{ sm: 8, lg: 4 }}
       flexDirection="row"
       justifyContent="space-between"
       alignItems="center"

@@ -1,3 +1,4 @@
+import { web3Errors } from '@onekeyfe/cross-inpage-provider-errors';
 import { IJsBridgeMessagePayload } from '@onekeyfe/cross-inpage-provider-types';
 
 import platformEnv from '@onekeyhq/shared/src/platformEnv';
@@ -10,10 +11,14 @@ import {
 } from '../../routes/routesEnum';
 import {
   DappSiteConnection,
+  DappSiteConnectionRemovePayload,
   DappSiteConnectionSavePayload,
+  dappRemoveSiteConnections,
   dappSaveSiteConnection,
 } from '../../store/reducers/dapp';
 import extUtils from '../../utils/extUtils';
+import { ManageNetworkRoutes } from '../../views/ManageNetworks/types';
+import { ManageTokenRoutes } from '../../views/ManageTokens/types';
 import { SendRoutes } from '../../views/Send/types';
 import { backgroundClass, backgroundMethod } from '../decorators';
 import { IDappCallParams } from '../IBackgroundApi';
@@ -49,7 +54,23 @@ class ServiceDapp extends ServiceBase {
     this.backgroundApi.dispatch(dappSaveSiteConnection(payload));
   }
 
-  openConnectionApprovalModal(request: CommonRequestParams['request']) {
+  @backgroundMethod()
+  removeConnectedAccounts(payload: DappSiteConnectionRemovePayload) {
+    this.backgroundApi.dispatch(dappRemoveSiteConnections(payload));
+  }
+
+  // TODO to decorator @permissionRequired()
+  authorizedRequired(request: IJsBridgeMessagePayload) {
+    const accounts = this.backgroundApi.serviceDapp?.getConnectedAccounts({
+      origin: request.origin as string,
+    });
+    if (!accounts || !accounts.length) {
+      // TODO move to UI check
+      throw web3Errors.provider.unauthorized();
+    }
+  }
+
+  openConnectionModal(request: CommonRequestParams['request']) {
     return this.openModal({
       request,
       screens: [
@@ -59,24 +80,38 @@ class ServiceDapp extends ServiceBase {
     });
   }
 
-  openApprovalModal(request: CommonRequestParams['request']) {
-    return this.openModal({
-      request,
-      screens: [ModalRoutes.DappApproveModal, DappModalRoutes.ApproveModal],
-    });
-  }
-
-  openMulticallModal(request: CommonRequestParams['request']) {
-    return this.openModal({
-      request,
-      screens: [ModalRoutes.DappMulticallModal, DappModalRoutes.MulticallModal],
-    });
-  }
-
-  openSendConfirmModal(request: IJsBridgeMessagePayload, params: any) {
+  openApprovalModal(request: IJsBridgeMessagePayload, params: any) {
+    this.authorizedRequired(request);
     return this.openModal({
       request,
       screens: [ModalRoutes.Send, SendRoutes.SendConfirmFromDapp],
+      params,
+    });
+  }
+
+  openAddTokenModal(request: IJsBridgeMessagePayload, params: any) {
+    return this.openModal({
+      request,
+      screens: [ModalRoutes.ManageToken, ManageTokenRoutes.AddToken],
+      params,
+    });
+  }
+
+  openAddNetworkModal(request: IJsBridgeMessagePayload, params: any) {
+    return this.openModal({
+      request,
+      screens: [
+        ModalRoutes.ManageNetwork,
+        ManageNetworkRoutes.AddNetworkConfirm,
+      ],
+      params,
+    });
+  }
+
+  openSwitchNetworkModal(request: IJsBridgeMessagePayload, params: any) {
+    return this.openModal({
+      request,
+      screens: [ModalRoutes.ManageNetwork, ManageNetworkRoutes.SwitchNetwork],
       params,
     });
   }
@@ -105,7 +140,7 @@ class ServiceDapp extends ServiceBase {
       const routeParams = {
         // stringify required, nested object not working with Ext route linking
         query: JSON.stringify({
-          sourceInfo,
+          sourceInfo, // TODO rename $sourceInfo
           ...params,
         }),
       };

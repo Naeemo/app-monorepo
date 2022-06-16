@@ -17,9 +17,11 @@ import {
   CreateWalletModalRoutes,
   CreateWalletRoutesParams,
 } from '@onekeyhq/kit/src/routes/Modal/CreateWallet';
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
 import img1 from '../../../assets/app_wallet_icon.png';
 import img2 from '../../../assets/hardware_icon.png';
+import { useActiveWalletAccount } from '../../hooks/redux';
 import { ModalScreenProps, RootRoutesParams } from '../../routes/types';
 
 type NavigationProps = ModalScreenProps<RootRoutesParams> &
@@ -29,6 +31,11 @@ const CreateWalletModal: FC = () => {
   const intl = useIntl();
   const navigation = useNavigation<NavigationProps['navigation']>();
 
+  const { network: activeNetwork } = useActiveWalletAccount();
+
+  const hardwareDisabled =
+    !activeNetwork?.settings?.hardwareAccountEnabled || platformEnv.isExtension;
+
   const content = (
     <VStack space={8} w="full">
       <VStack space={4}>
@@ -37,7 +44,7 @@ const CreateWalletModal: FC = () => {
           borderRadius="12px"
           px={4}
           onPress={() => {
-            navigation.navigate(CreateWalletModalRoutes.AppWalletDoneModal);
+            navigation.navigate(CreateWalletModalRoutes.NewWalletModal);
           }}
         >
           <HStack justifyContent="space-between" alignItems="center">
@@ -70,16 +77,21 @@ const CreateWalletModal: FC = () => {
           borderRadius="12px"
           px={4}
           onPress={() => {
+            if (hardwareDisabled) return;
             navigation.navigate(CreateWalletModalRoutes.ConnectHardwareModal);
           }}
         >
           <HStack justifyContent="space-between" alignItems="center">
             <Image source={img2} width="10" height="12" alt="icon" />
-            <Badge
-              title={intl.formatMessage({ id: 'badge__coming_soon' })}
-              size="sm"
-              type="default"
-            />
+            {hardwareDisabled ? (
+              <Badge
+                title={intl.formatMessage({ id: 'badge__coming_soon' })}
+                size="sm"
+                type="default"
+              />
+            ) : (
+              <Icon name="ChevronRightOutline" size={24} />
+            )}
           </HStack>
           <VStack space={1} mt={6}>
             <Typography.Body1Strong>

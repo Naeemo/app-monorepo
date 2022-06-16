@@ -1,74 +1,61 @@
 /* eslint no-unused-vars: ["warn", { "argsIgnorePattern": "^_" }] */
 /* eslint @typescript-eslint/no-unused-vars: ["warn", { "argsIgnorePattern": "^_" }] */
+
 import {
-  CurveName,
-  batchGetPrivateKeys,
   mnemonicFromEntropy,
-  publicFromPrivate,
   revealableSeedFromMnemonic,
 } from '@onekeyfe/blockchain-libs/dist/secret';
-import {
-  decrypt,
-  encrypt,
-} from '@onekeyfe/blockchain-libs/dist/secret/encryptors/aes256';
-import { Features } from '@onekeyfe/connect';
+import { encrypt } from '@onekeyfe/blockchain-libs/dist/secret/encryptors/aes256';
 import { IJsonRpcRequest } from '@onekeyfe/cross-inpage-provider-types';
+import { Features } from '@onekeyfe/js-sdk';
 import BigNumber from 'bignumber.js';
 import * as bip39 from 'bip39';
+import { baseDecode } from 'borsh';
+import bs58check from 'bs58check';
+import memoizee from 'memoizee';
 import natsort from 'natsort';
 
 import {
   backgroundClass,
   backgroundMethod,
 } from '@onekeyhq/kit/src/background/decorators';
+import { Avatar } from '@onekeyhq/kit/src/utils/emojiUtils';
+import { SendConfirmPayload } from '@onekeyhq/kit/src/views/Send/types';
 import debugLogger from '@onekeyhq/shared/src/logger/debugLogger';
+import { IOneKeyDeviceFeatures } from '@onekeyhq/shared/types';
 
-import { IMPL_EVM, IMPL_SOL, SEPERATOR, getSupportedImpls } from './constants';
+import {
+  IMPL_BTC,
+  IMPL_EVM,
+  IMPL_NEAR,
+  IMPL_SOL,
+  getSupportedImpls,
+} from './constants';
 import { DbApi } from './dbs';
 import {
   DBAPI,
   DEFAULT_VERIFY_STRING,
-  ExportedPrivateKeyCredential,
   ExportedSeedCredential,
   checkPassword,
 } from './dbs/base';
 import {
-  FailedToTransfer,
   NotImplemented,
   OneKeyHardwareError,
   OneKeyInternalError,
 } from './errors';
-import * as OneKeyHardware from './hardware';
 import {
   getWalletIdFromAccountId,
   isAccountCompatibleWithNetwork,
 } from './managers/account';
-import {
-  decodedItemToTransaction,
-  getErc20TransferHistories,
-  getTxHistories,
-  updateLocalTransactions,
-} from './managers/covalent';
-import { getDefaultPurpose, getXpubs } from './managers/derivation';
-import {
-  getAccountNameInfoByImpl,
-  getDefaultCurveByCoinType,
-  implToAccountType,
-  implToCoinTypes,
-} from './managers/impl';
+import { getDefaultPurpose } from './managers/derivation';
+import { implToCoinTypes } from './managers/impl';
 import {
   fromDBNetworkToNetwork,
   getEVMNetworkToCreate,
   getImplFromNetworkId,
 } from './managers/network';
 import { getNetworkIdFromTokenId } from './managers/token';
-import {
-  walletCanBeRemoved,
-  walletIsHD,
-  walletIsHW,
-  walletIsImported,
-  walletNameCanBeUpdated,
-} from './managers/wallet';
+import { walletCanBeRemoved, walletIsHD } from './managers/wallet';
 import {
   getPresetNetworks,
   getPresetToken,
@@ -83,17 +70,16 @@ import {
   PriceController,
   ProviderController,
   fromDBNetworkToChainInfo,
-  getRPCStatus,
 } from './proxy';
 import {
   Account,
   AccountType,
   DBAccount,
-  DBSimpleAccount,
+  DBUTXOAccount,
   DBVariantAccount,
   ImportableHDAccount,
 } from './types/account';
-import { CredentialSelector, CredentialType } from './types/credential';
+import { CredentialType } from './types/credential';
 import {
   HistoryEntry,
   HistoryEntryMeta,
@@ -101,25 +87,31 @@ import {
   HistoryEntryTransaction,
   HistoryEntryType,
 } from './types/history';
-import { Message } from './types/message';
 import {
   AddNetworkParams,
+  DBNetwork,
   EIP1559Fee,
   Network,
   UpdateNetworkParams,
 } from './types/network';
 import { Token } from './types/token';
+import { Wallet } from './types/wallet';
+import { Validators } from './validators';
+import { createVaultHelperInstance } from './vaults/factory';
+import { getMergedTxs } from './vaults/impl/evm/decoder/history';
+import { IUnsignedMessageEvm } from './vaults/impl/evm/Vault';
 import {
-  IEncodedTxAny,
+  IDecodedTx,
+  IDecodedTxLegacy,
+  IEncodedTx,
   IEncodedTxUpdateOptions,
   IFeeInfoUnit,
-} from './types/vault';
-import { WALLET_TYPE_HD, WALLET_TYPE_HW, Wallet } from './types/wallet';
-import { Validators } from './validators';
-import { EVMTxDecoder } from './vaults/impl/evm/decoder/decoder';
+  IVaultSettings,
+} from './vaults/types';
 import { VaultFactory } from './vaults/VaultFactory';
 
-import type { ITransferInfo, IVaultFactoryOptions } from './types/vault';
+import type BTCVault from './vaults/impl/btc/Vault';
+import type { ITransferInfo } from './vaults/types';
 
 @backgroundClass()
 class Engine {
@@ -143,7 +135,7 @@ class Engine {
         .getNetwork(networkId)
         .then((dbNetwork) => fromDBNetworkToChainInfo(dbNetwork)),
     );
-    this.validator = new Validators(this.dbApi, this.providerManager);
+    this.validator = new Validators(this);
   }
 
   async syncPresetNetworks(): Promise<void> {
@@ -220,52 +212,69 @@ class Engine {
     }
   }
 
-  async getCredentialSelectorForAccount(
-    accountId: string,
-    password: string,
-  ): Promise<CredentialSelector> {
-    const walletId = getWalletIdFromAccountId(accountId);
-    if (walletIsHD(walletId)) {
-      const { seed } = (await this.dbApi.getCredential(
-        walletId,
-        password,
-      )) as ExportedSeedCredential;
-      return {
-        type: CredentialType.SOFTWARE,
-        seed,
-        password,
-      };
-    }
-    if (walletIsHW(walletId)) {
-      return {
-        type: CredentialType.HARDWARE,
-      };
-    }
-    if (walletIsImported(walletId)) {
-      const { privateKey } = (await this.dbApi.getCredential(
-        accountId,
-        password,
-      )) as ExportedPrivateKeyCredential;
-      return {
-        type: CredentialType.PRIVATE_KEY,
-        privateKey,
-        password,
-      };
-    }
-    throw new OneKeyInternalError(
-      `Can't get credential for account ${accountId}.`,
-    );
+  @backgroundMethod()
+  generateMnemonic(): Promise<string> {
+    return Promise.resolve(bip39.generateMnemonic());
   }
 
   @backgroundMethod()
   mnemonicToEntropy(mnemonic: string): Promise<string> {
+    const wordlists = bip39.wordlists.english;
+    const n = wordlists.length;
+    const words = mnemonic.split(' ');
+    let i = new BigNumber(0);
+    while (words.length) {
+      const w = words.pop();
+      if (w) {
+        const k = wordlists.indexOf(w);
+        i = i.times(n).plus(k);
+      }
+    }
+    return Promise.resolve(i.toFixed());
+  }
+
+  @backgroundMethod()
+  entropyToMnemonic(entropy: string): Promise<string> {
+    const wordlists = bip39.wordlists.english;
+    const n = wordlists.length;
+
+    const mnemonic = [];
+    let ent = new BigNumber(entropy);
+    let x = 0;
+    while (ent.gt(0)) {
+      x = ent.mod(n).integerValue().toNumber();
+      ent = ent.idiv(n);
+
+      mnemonic.push(wordlists[x]);
+    }
+
+    // v1 fix
+    let fixFillCount = 0;
+    if (mnemonic.length < 12) {
+      fixFillCount = 12 - mnemonic.length;
+    } else if (mnemonic.length > 12 && mnemonic.length < 18) {
+      fixFillCount = 18 - mnemonic.length;
+    } else if (mnemonic.length > 18 && mnemonic.length < 24) {
+      fixFillCount = 24 - mnemonic.length;
+    }
+
+    // eslint-disable-next-line no-plusplus
+    for (let i = 0; i < fixFillCount; i++) {
+      mnemonic.push(wordlists[0]);
+    }
+
+    return Promise.resolve(mnemonic.join(' '));
+  }
+
+  @backgroundMethod()
+  mnemonicToEntropyV2(mnemonic: string): Promise<string> {
     return Promise.resolve(
       bip39.mnemonicToEntropy(mnemonic, bip39.wordlists.english),
     );
   }
 
   @backgroundMethod()
-  entropyToMnemonic(entropy: string): Promise<string> {
+  entropyToMnemonicV2(entropy: string): Promise<string> {
     return Promise.resolve(
       bip39.entropyToMnemonic(entropy, bip39.wordlists.english),
     );
@@ -291,11 +300,17 @@ class Engine {
   }
 
   @backgroundMethod()
-  async createHDWallet(
-    password: string,
-    mnemonic?: string,
-    name?: string,
-  ): Promise<Wallet> {
+  async createHDWallet({
+    password,
+    mnemonic,
+    name,
+    avatar,
+  }: {
+    password: string;
+    mnemonic?: string;
+    name?: string;
+    avatar?: Avatar;
+  }): Promise<Wallet> {
     // Create an HD wallet, generate seed if not provided.
     if (typeof name !== 'undefined' && name.length > 0) {
       await this.validator.validateWalletName(name);
@@ -316,50 +331,69 @@ class Engine {
     if (
       usedMnemonic === mnemonicFromEntropy(rs.entropyWithLangPrefixed, password)
     ) {
-      const wallet = await this.dbApi.createHDWallet(
+      const wallet = await this.dbApi.createHDWallet({
         password,
         rs,
-        typeof mnemonic !== 'undefined',
+        backuped: typeof mnemonic !== 'undefined',
         name,
-      );
-      try {
-        const supportedImpls = getSupportedImpls();
-        const addedImpl = new Set();
-        const networks: Array<string> = [];
-        (await this.listNetworks()).forEach(({ id: networkId, impl }) => {
-          if (supportedImpls.has(impl) && !addedImpl.has(impl)) {
-            addedImpl.add(impl);
-            networks.push(networkId);
-          }
-        });
-        for (const networkId of networks) {
-          await this.addHDAccounts(password, wallet.id, networkId);
+        avatar,
+      });
+
+      const supportedImpls = getSupportedImpls();
+      const addedImpl = new Set();
+      const networks: Array<string> = [];
+      (await this.listNetworks()).forEach(({ id: networkId, impl }) => {
+        if (supportedImpls.has(impl) && !addedImpl.has(impl)) {
+          addedImpl.add(impl);
+          networks.push(networkId);
         }
-      } catch (e) {
-        console.error(e);
-      }
-      return this.dbApi.getWallet(wallet.id) as Promise<Wallet>;
+      });
+      await Promise.all(
+        networks.map((networkId) =>
+          this.addHdOrHwAccounts(password, wallet.id, networkId).then(
+            undefined,
+            (e) => console.error(e),
+          ),
+        ),
+      );
+
+      return this.dbApi.confirmWalletCreated(wallet.id);
     }
 
     throw new OneKeyInternalError('Invalid mnemonic.');
   }
 
   @backgroundMethod()
-  async createHWWallet(name?: string): Promise<Wallet> {
+  async createHWWallet({
+    name,
+    avatar,
+    features,
+  }: {
+    name?: string;
+    avatar?: Avatar;
+    features: IOneKeyDeviceFeatures;
+  }): Promise<Wallet> {
     if (typeof name !== 'undefined' && name.length > 0) {
       await this.validator.validateWalletName(name);
     }
     await this.validator.validateHWWalletNumber();
-    const features = await OneKeyHardware.getFeatures();
+
     if (!features.initialized) {
-      throw new OneKeyHardwareError('Hardware wallet not initialized.');
+      throw new OneKeyHardwareError({
+        message: 'Hardware wallet not initialized.',
+      });
     }
     const id = features.onekey_serial ?? features.serial_no ?? '';
     if (id.length === 0) {
       throw new OneKeyInternalError('Bad device identity.');
     }
     const walletName = name ?? features.ble_name ?? `OneKey ${id.slice(-4)}`;
-    return this.dbApi.addHWWallet(id, walletName);
+    return this.dbApi.addHWWallet({ id, name: walletName, avatar });
+  }
+
+  @backgroundMethod()
+  async getHWDevices() {
+    return this.dbApi.getDevices();
   }
 
   @backgroundMethod()
@@ -372,15 +406,15 @@ class Engine {
   }
 
   @backgroundMethod()
-  async setWalletName(walletId: string, name: string): Promise<Wallet> {
+  async setWalletNameAndAvatar(
+    walletId: string,
+    { name, avatar }: { name?: string; avatar?: Avatar },
+  ): Promise<Wallet> {
     // Rename a wallet, raise an error if trying to rename the imported or watching wallet.
-    await this.validator.validateWalletName(name);
-    if (!walletNameCanBeUpdated(walletId)) {
-      throw new OneKeyInternalError(
-        `Wallet ${walletId}'s name cannot be updated.`,
-      );
+    if (typeof name !== 'undefined') {
+      await this.validator.validateWalletName(name);
     }
-    return this.dbApi.setWalletName(walletId, name);
+    return this.dbApi.setWalletNameAndAvatar(walletId, { name, avatar });
   }
 
   @backgroundMethod()
@@ -408,53 +442,43 @@ class Engine {
     return this.dbApi.confirmHDWalletBackuped(walletId);
   }
 
-  private async buildReturnedAccount(
-    dbAccount: DBAccount,
-    networkId?: string,
-  ): Promise<Account> {
-    const account = {
-      id: dbAccount.id,
-      name: dbAccount.name,
-      type: dbAccount.type,
-      path: dbAccount.path,
-      coinType: dbAccount.coinType,
-      tokens: [],
-      address: dbAccount.address,
-    };
-    switch (dbAccount.type) {
-      case AccountType.SIMPLE:
-        if (dbAccount.address === '' && typeof networkId !== 'undefined') {
-          const address = await this.providerManager.addressFromPub(
-            networkId,
-            (dbAccount as DBSimpleAccount).pub,
-          );
-          await this.dbApi.addAccountAddress(dbAccount.id, networkId, address);
-          account.address = address;
-        }
-        break;
-      case AccountType.VARIANT:
-        if (typeof networkId !== 'undefined') {
-          account.address = ((dbAccount as DBVariantAccount).addresses || {})[
-            networkId
-          ];
-          if (typeof account.address === 'undefined') {
-            const address = await this.providerManager.addressFromBase(
-              networkId,
-              dbAccount.address,
-            );
-            await this.dbApi.addAccountAddress(
-              dbAccount.id,
-              networkId,
-              address,
-            );
-            account.address = address;
-          }
-        }
-        break;
-      default:
-        break;
+  @backgroundMethod()
+  async getWalletAccountsGroupedByNetwork(
+    walletId: string,
+  ): Promise<Array<{ networkId: string; accounts: Array<Account> }>> {
+    const wallet = await this.getWallet(walletId);
+    const accounts = await this.getAccounts(wallet.accounts);
+    const networks = await this.listNetworks();
+
+    const networkToAccounts: Record<string, Array<Account>> = {};
+    const coinTypeToNetworks: Record<string, Array<string>> = {};
+    for (const network of networks) {
+      networkToAccounts[network.id] = [];
+      const coinType = implToCoinTypes[network.impl];
+      if (coinType in coinTypeToNetworks) {
+        coinTypeToNetworks[coinType].push(network.id);
+      } else {
+        coinTypeToNetworks[coinType] = [network.id];
+      }
     }
-    return Promise.resolve(account);
+
+    for (const account of accounts) {
+      for (const networkId of coinTypeToNetworks[account.coinType] || []) {
+        if (account.type !== AccountType.VARIANT) {
+          networkToAccounts[networkId].push(account);
+        } else {
+          const vault = await this.getVault({
+            networkId,
+            accountId: account.id,
+          });
+          networkToAccounts[networkId].push(await vault.getOutputAccount());
+        }
+      }
+    }
+    return networks.map(({ id: networkId }) => ({
+      networkId,
+      accounts: networkToAccounts[networkId],
+    }));
   }
 
   @backgroundMethod()
@@ -476,7 +500,21 @@ class Engine {
             isAccountCompatibleWithNetwork(a.id, networkId),
         )
         .sort((a, b) => natsort({ insensitive: true })(a.name, b.name))
-        .map((a: DBAccount) => this.buildReturnedAccount(a, networkId)),
+        .map((a: DBAccount) =>
+          typeof networkId === 'undefined'
+            ? {
+                id: a.id,
+                name: a.name,
+                type: a.type,
+                path: a.path,
+                coinType: a.coinType,
+                tokens: [],
+                address: a.address,
+              }
+            : this.getVault({ accountId: a.id, networkId }).then((vault) =>
+                vault.getOutputAccount(),
+              ),
+        ),
     );
   }
 
@@ -484,10 +522,8 @@ class Engine {
   async getAccount(accountId: string, networkId: string): Promise<Account> {
     // Get account by id. Raise an error if account doesn't exist.
     // Token ids are included.
-    const dbAccount = await this.dbApi.getAccount(accountId);
-    const account = await this.buildReturnedAccount(dbAccount, networkId);
-    account.tokens = await this.dbApi.getTokens(networkId, accountId);
-    return account;
+    const vault = await this.getVault({ accountId, networkId });
+    return vault.getOutputAccount();
   }
 
   @backgroundMethod()
@@ -496,46 +532,21 @@ class Engine {
     password: string,
     // networkId?: string, TODO: different curves on different networks.
   ): Promise<string> {
-    const walletId = getWalletIdFromAccountId(accountId);
-    if (!walletIsHD(walletId) && !walletIsImported(walletId)) {
-      throw new OneKeyInternalError(
-        'Only private key of HD or imported accounts can be exported.',
-      );
+    const { coinType } = await this.dbApi.getAccount(accountId);
+    // TODO: need a method to get default network from coinType.
+    const networkId = {
+      '60': 'evm--1',
+      '503': 'cfx--1029',
+      '397': 'near--0',
+      '0': 'btc--0',
+      '101010': 'stc--1',
+    }[coinType];
+    if (typeof networkId === 'undefined') {
+      throw new NotImplemented('Unsupported network.');
     }
 
-    const credentialSelector = await this.getCredentialSelectorForAccount(
-      accountId,
-      password,
-    );
-
-    let encryptedPrivateKey: Buffer;
-    switch (credentialSelector.type) {
-      case CredentialType.SOFTWARE: {
-        const dbAccount = await this.dbApi.getAccount(accountId);
-        const curve = getDefaultCurveByCoinType(dbAccount.coinType);
-        const pathComponents = dbAccount.path.split('/');
-        const relPath = pathComponents.pop() as string;
-        encryptedPrivateKey = batchGetPrivateKeys(
-          curve as CurveName,
-          credentialSelector.seed,
-          password,
-          pathComponents.join('/'),
-          [relPath],
-        )[0].extendedKey.key;
-        break;
-      }
-      case CredentialType.PRIVATE_KEY:
-        encryptedPrivateKey = credentialSelector.privateKey;
-        break;
-      default:
-        throw new NotImplemented();
-    }
-
-    if (typeof encryptedPrivateKey === 'undefined') {
-      throw new NotImplemented();
-    }
-
-    return `0x${decrypt(password, encryptedPrivateKey).toString('hex')}`;
+    const vault = await this.getVault({ accountId, networkId });
+    return vault.getExportedCredential(password);
   }
 
   @backgroundMethod()
@@ -560,6 +571,7 @@ class Engine {
     const tokensToGet = tokenIdsOnNetwork.filter(
       (tokenId) => typeof decimalsMap[tokenId] !== 'undefined',
     );
+    // TODO move proxyGetBalances to Vault
     const balances = await this.providerManager.proxyGetBalances(
       networkId,
       dbAccount,
@@ -567,10 +579,14 @@ class Engine {
       withMain,
     );
     const ret: Record<string, string | undefined> = {};
-    if (withMain && typeof balances[0] !== 'undefined') {
-      ret.main = balances[0]
-        .div(new BigNumber(10).pow(network.decimals))
-        .toFixed();
+    if (withMain) {
+      if (typeof balances[0] !== 'undefined') {
+        ret.main = balances[0]
+          .div(new BigNumber(10).pow(network.decimals))
+          .toFixed();
+      } else {
+        ret.main = undefined;
+      }
     }
     balances.slice(withMain ? 1 : 0).forEach((balance, index) => {
       const tokenId1 = tokensToGet[index];
@@ -600,55 +616,43 @@ class Engine {
       throw new OneKeyInternalError(`Wallet ${walletId} not found.`);
     }
 
-    const { impl } = dbNetwork;
-    const accountPrefix =
-      getAccountNameInfoByImpl(impl)[purpose || 'default'].prefix;
+    const indexes = Array.from(Array(limit).keys())
+      .map((index) => start + index)
+      .filter((i) => i < 2 ** 31);
 
-    let credential: CredentialSelector;
-    let outputFormat = 'pub'; // For UTXO, should be xpub, for now, only pub(software) or address(hardware) is possible.
-
-    if (wallet.type === WALLET_TYPE_HD) {
-      const { seed } = (await this.dbApi.getCredential(
-        wallet.id,
-        password,
-      )) as ExportedSeedCredential;
-      credential = {
-        type: CredentialType.SOFTWARE,
-        seed,
-        password,
-      };
-    } else if (wallet.type === WALLET_TYPE_HW) {
-      credential = { type: CredentialType.HARDWARE };
-      outputFormat = 'address';
-    } else {
-      throw new OneKeyInternalError('Incorrect wallet selector.');
-    }
-
-    const accountInfos = await getXpubs(
-      impl,
-      credential,
-      outputFormat as 'xpub' | 'pub' | 'address',
-      Array.from(Array(limit).keys()).map((index) => start + index),
+    const vault = await this.getWalletOnlyVault(networkId, walletId);
+    const accounts = await vault.keyring.prepareAccounts({
+      type: 'SEARCH_ACCOUNTS',
+      password,
+      indexes,
       purpose,
-      dbNetwork.curve,
-    );
+    });
 
-    const addresses = await Promise.all(
-      accountInfos.map((accountInfo) =>
-        outputFormat === 'pub'
-          ? this.providerManager.addressFromPub(networkId, accountInfo.info)
-          : Promise.resolve(accountInfo.info),
-      ),
+    const addresses = accounts.map((a) => {
+      if (a.type === AccountType.UTXO) {
+        // TODO: utxo should use xpub instead of its first address
+        return (a as DBUTXOAccount).address;
+      }
+      if (a.type === AccountType.VARIANT) {
+        return (a as DBVariantAccount).addresses[networkId];
+      }
+      return a.address;
+    });
+    // TODO: balance is not display when searching now
+    const balances: Array<BigNumber | undefined> = addresses.map(
+      () => undefined,
     );
+    /*
     const balances = await this.providerManager.proxyGetBalances(
       networkId,
       addresses,
       [],
     );
+    */
     return balances.map((balance, index) => ({
       index: start + index,
-      path: accountInfos[index].path,
-      defaultName: `${accountPrefix} #${start + index + 1}`,
+      path: accounts[index].path,
+      defaultName: accounts[index].name,
       displayAddress: addresses[index],
       mainBalance:
         typeof balance === 'undefined'
@@ -658,7 +662,7 @@ class Engine {
   }
 
   @backgroundMethod()
-  async addHDAccounts(
+  async addHdOrHwAccounts(
     password: string,
     walletId: string,
     networkId: string,
@@ -686,76 +690,28 @@ class Engine {
     }
 
     const { impl } = dbNetwork;
-    const coinType = implToCoinTypes[impl];
-    if (typeof coinType === 'undefined') {
-      throw new OneKeyInternalError(`Unsupported implementation ${impl}.`);
-    }
-    const accountType = implToAccountType[impl];
-    if (typeof accountType === 'undefined') {
-      throw new OneKeyInternalError(`Unsupported implementation ${impl}.`);
-    }
-    const accountPrefix =
-      getAccountNameInfoByImpl(impl)[purpose || 'default'].prefix;
-
     const usedPurpose = purpose || getDefaultPurpose(impl);
     const usedIndexes = indexes || [
       wallet.nextAccountIds[`${usedPurpose}'/${implToCoinTypes[impl]}'`] || 0,
     ];
-    let credential: CredentialSelector;
-    let outputFormat = 'pub'; // For UTXO, should be xpub, for now, only pub(software) or address(hardware) is possible.
-
-    if (wallet.type === WALLET_TYPE_HD) {
-      const { seed } = (await this.dbApi.getCredential(
-        wallet.id,
-        password,
-      )) as ExportedSeedCredential;
-      credential = {
-        type: CredentialType.SOFTWARE,
-        seed,
-        password,
-      };
-    } else if (wallet.type === WALLET_TYPE_HW) {
-      credential = { type: CredentialType.HARDWARE };
-      outputFormat = 'address';
-    } else {
-      throw new OneKeyInternalError('Incorrect wallet selector.');
+    if (usedIndexes.some((index) => index >= 2 ** 31)) {
+      throw new OneKeyInternalError(
+        'Invalid child index, should be less than 2^31.',
+      );
     }
 
-    const accountInfos = await getXpubs(
-      impl,
-      credential,
-      outputFormat as 'xpub' | 'pub' | 'address',
-      usedIndexes,
-      purpose,
-      dbNetwork.curve,
-    );
+    const vault = await this.getWalletOnlyVault(networkId, walletId);
+    const accounts = await vault.keyring.prepareAccounts({
+      type: 'ADD_ACCOUNTS',
+      password,
+      indexes: usedIndexes,
+      purpose: usedPurpose,
+      names,
+    });
+
     const ret: Array<Account> = [];
-    let accountIndex = 0;
-
-    for (const accountInfo of accountInfos) {
-      let address = '';
-      if (accountType === AccountType.VARIANT && outputFormat === 'pub') {
-        address = await this.providerManager.addressFromPub(
-          networkId,
-          accountInfo.info,
-        );
-        address = await this.providerManager.addressToBase(networkId, address);
-      } else if (outputFormat === 'address') {
-        address = accountInfo.info;
-      }
-
-      const accountNum = usedIndexes[accountIndex] + 1;
-      const name =
-        (names || [])[accountIndex] || `${accountPrefix} #${accountNum}`;
-      const { id } = await this.dbApi.addAccountToWallet(wallet.id, {
-        id: `${wallet.id}--${accountInfo.path}`,
-        name,
-        type: accountType,
-        path: accountInfo.path,
-        coinType,
-        pub: outputFormat === 'pub' ? accountInfo.info : '',
-        address,
-      });
+    for (const dbAccount of accounts) {
+      const { id } = await this.dbApi.addAccountToWallet(walletId, dbAccount);
 
       await this.addDefaultToken(id, impl);
 
@@ -764,7 +720,6 @@ class Engine {
       if ((await callback(account)) === false) {
         break;
       }
-      accountIndex += 1;
     }
     return ret;
   }
@@ -777,62 +732,50 @@ class Engine {
     name?: string,
   ): Promise<Account> {
     const impl = getImplFromNetworkId(networkId);
-    if (impl !== IMPL_EVM) {
-      // TODO: support other impls besides EVMs.
-      throw new OneKeyInternalError(`Unsupported implementation ${impl}.`);
+    let privateKey: Buffer | undefined;
+    // TODO: use vault to extract private key.
+    try {
+      switch (impl) {
+        case IMPL_BTC:
+          privateKey = bs58check.decode(credential);
+          break;
+        case IMPL_NEAR: {
+          const [prefix, encoded] = credential.split(':');
+          const decodedPrivateKey = Buffer.from(baseDecode(encoded));
+          if (prefix === 'ed25519' && decodedPrivateKey.length === 64) {
+            privateKey = decodedPrivateKey.slice(0, 32);
+          }
+          break;
+        }
+        default:
+          privateKey = Buffer.from(
+            credential.startsWith('0x') ? credential.slice(2) : credential,
+            'hex',
+          );
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    if (typeof privateKey === 'undefined') {
+      throw new OneKeyInternalError('Invalid credential to import.');
     }
 
-    const coinType = implToCoinTypes[impl];
-    if (typeof coinType === 'undefined') {
-      throw new OneKeyInternalError(`Unsupported implementation ${impl}.`);
-    }
-    const accountType = implToAccountType[impl];
-    if (typeof accountType === 'undefined') {
-      throw new OneKeyInternalError(`Unsupported implementation ${impl}.`);
-    }
-
-    const privateKey = Buffer.from(
-      credential.startsWith('0x') ? credential.slice(2) : credential,
-      'hex',
-    );
-    if (privateKey.length !== 32) {
-      throw new OneKeyInternalError('Invalid private key.'); // TODO
-    }
-
-    const curve = getDefaultCurveByCoinType(coinType) as CurveName;
     const encryptedPrivateKey = encrypt(password, privateKey);
-    const publicKey = publicFromPrivate(
-      curve,
-      encryptedPrivateKey,
+    const vault = await this.getWalletOnlyVault(networkId, 'imported');
+    const [dbAccount] = await vault.keyring.prepareAccounts({
+      privateKey,
+      name: name || '',
+    });
+
+    await this.dbApi.addAccountToWallet('imported', dbAccount, {
+      type: CredentialType.PRIVATE_KEY,
+      privateKey: encryptedPrivateKey,
       password,
-    ).toString('hex');
-    const accountId = `imported--${coinType}--${publicKey}`;
-    const address = await this.providerManager.addressFromPub(
-      networkId,
-      publicKey,
-    );
+    });
 
-    await this.dbApi.addAccountToWallet(
-      'imported',
-      {
-        id: accountId,
-        name: name || '',
-        type: accountType,
-        path: '',
-        coinType,
-        pub: publicKey,
-        address,
-      },
-      {
-        type: CredentialType.PRIVATE_KEY,
-        privateKey: encryptedPrivateKey,
-        password,
-      },
-    );
+    await this.addDefaultToken(dbAccount.id, impl);
 
-    await this.addDefaultToken(accountId, impl);
-
-    return this.getAccount(accountId, networkId);
+    return this.getAccount(dbAccount.id, networkId);
   }
 
   @backgroundMethod()
@@ -844,34 +787,16 @@ class Engine {
     // throw new Error('sample test error');
     // Add an watching account. Raise an error if account already exists.
     // TODO: now only adding by address is supported.
-    const [, normalizedAddress] = await Promise.all([
-      this.validator.validateAccountNames([name]),
-      this.validator.validateAddress(networkId, target),
-    ]);
+    await this.validator.validateAccountNames([name]);
 
     const impl = getImplFromNetworkId(networkId);
-    const coinType = implToCoinTypes[impl];
-    if (typeof coinType === 'undefined') {
-      throw new OneKeyInternalError(`Unsupported implementation ${impl}.`);
-    }
-    const accountType = implToAccountType[impl];
-    if (typeof accountType === 'undefined') {
-      throw new OneKeyInternalError(`Unsupported implementation ${impl}.`);
-    }
-
-    let address = normalizedAddress;
-    if (accountType === AccountType.VARIANT) {
-      address = await this.providerManager.addressToBase(networkId, address);
-    }
-    const a = await this.dbApi.addAccountToWallet('watching', {
-      id: `watching--${coinType}--${address}`,
-      name: name || '',
-      type: accountType,
-      path: '',
-      coinType,
-      pub: '', // TODO: only address is supported for now.
-      address,
+    const vault = await this.getWalletOnlyVault(networkId, 'watching');
+    const [dbAccount] = await vault.keyring.prepareAccounts({
+      target,
+      name,
     });
+
+    const a = await this.dbApi.addAccountToWallet('watching', dbAccount);
 
     await this.addDefaultToken(a.id, impl);
 
@@ -893,17 +818,42 @@ class Engine {
     // Rename an account. Raise an error if account doesn't exist.
     // Nothing happens if name is not changed.
     await this.validator.validateAccountNames([name]);
-    const a = await this.dbApi.setAccountName(accountId, name);
-    return this.buildReturnedAccount(a);
+    const dbAccount = await this.dbApi.setAccountName(accountId, name);
+    return {
+      id: dbAccount.id,
+      name: dbAccount.name,
+      type: dbAccount.type,
+      path: dbAccount.path,
+      coinType: dbAccount.coinType,
+      tokens: [],
+      address: dbAccount.address,
+    };
+  }
+
+  @backgroundMethod()
+  public async isTokenExistsInDb({
+    networkId,
+    tokenIdOnNetwork,
+  }: {
+    networkId: string;
+    tokenIdOnNetwork: string;
+  }) {
+    const tokenId = `${networkId}--${tokenIdOnNetwork}`;
+    const token = await this.dbApi.getToken(tokenId);
+    return !!token;
   }
 
   @backgroundMethod()
   public async getOrAddToken(
     networkId: string,
     tokenIdOnNetwork: string,
-    requireAlreadyAdded = false,
+    requireAlreadyAdded = false, // TODO remove
   ): Promise<Token | undefined> {
     let noThisToken: undefined;
+
+    if (!tokenIdOnNetwork) {
+      return this.getNativeTokenInfo(networkId);
+    }
 
     const tokenId = `${networkId}--${tokenIdOnNetwork}`;
     const token = await this.dbApi.getToken(tokenId);
@@ -913,14 +863,16 @@ class Engine {
     }
 
     if (requireAlreadyAdded) {
-      throw new OneKeyInternalError(`token ${tokenIdOnNetwork} not found.`);
+      // DO Not throw error here, may cause workflow crash.
+      //    if you need check token exists, please use `isTokenExistsInDb()`
+      // throw new OneKeyInternalError(`token ${tokenIdOnNetwork} not found.`);
     }
 
+    const vault = await this.getChainOnlyVault(networkId);
     const toAdd = getPresetToken(networkId, tokenIdOnNetwork);
-    const [tokenInfo] = await this.providerManager.getTokenInfos(networkId, [
-      tokenIdOnNetwork,
-    ]);
+    const [tokenInfo] = await vault.fetchTokenInfos([tokenIdOnNetwork]);
     if (typeof tokenInfo === 'undefined') {
+      console.error('fetch tokenInfo ERROR: ', networkId, tokenIdOnNetwork);
       return noThisToken;
     }
     const overwrite: Partial<Token> = {
@@ -1060,6 +1012,20 @@ class Engine {
     ];
   }
 
+  async getNativeTokenInfo(networkId: string) {
+    const dbNetwork = await this.dbApi.getNetwork(networkId);
+
+    return {
+      id: dbNetwork.id,
+      name: dbNetwork.name,
+      networkId,
+      tokenIdOnNetwork: '',
+      symbol: dbNetwork.symbol,
+      decimals: dbNetwork.decimals,
+      logoURI: dbNetwork.logoURI,
+    };
+  }
+
   @backgroundMethod()
   async getTokens(
     networkId: string,
@@ -1070,16 +1036,8 @@ class Engine {
     const tokens = await this.dbApi.getTokens(networkId, accountId);
     if (typeof accountId !== 'undefined') {
       if (withMain) {
-        const dbNetwork = await this.dbApi.getNetwork(networkId);
-        tokens.unshift({
-          id: dbNetwork.id,
-          name: dbNetwork.name,
-          networkId,
-          tokenIdOnNetwork: '',
-          symbol: dbNetwork.symbol,
-          decimals: dbNetwork.decimals,
-          logoURI: dbNetwork.logoURI,
-        });
+        const nativeToken = await this.getNativeTokenInfo(networkId);
+        tokens.unshift(nativeToken);
       }
       return tokens;
     }
@@ -1163,18 +1121,10 @@ class Engine {
         this.validator.validateTokenAddress(networkId, tokenIdOnNetwork),
         this.validator.validateAddress(networkId, spender),
       ]);
-      const [dbAccount, token] = await Promise.all([
-        this.dbApi.getAccount(accountId),
-        this.getOrAddToken(networkId, tokenAddress, true),
-      ]);
-      if (typeof token === 'undefined') {
-        // Token not found locally
-        return;
-      }
-      const allowance = await this.providerManager.getTokenAllowance(
-        networkId,
-        dbAccount,
-        token,
+
+      const vault = await this.getVault({ accountId, networkId });
+      const allowance = await vault.getTokenAllowance(
+        tokenAddress,
         spenderAddress,
       );
       if (!allowance.isNaN()) {
@@ -1183,6 +1133,28 @@ class Engine {
     } catch (e) {
       console.error(e);
     }
+  }
+
+  @backgroundMethod()
+  async signMessage({
+    unsignedMessage,
+    password,
+    networkId,
+    accountId,
+  }: {
+    unsignedMessage?: IUnsignedMessageEvm;
+    password: string;
+    networkId: string;
+    accountId: string;
+  }) {
+    const vault = await this.getVault({
+      accountId,
+      networkId,
+    });
+    const [signedMessage] = await vault.keyring.signMessage([unsignedMessage], {
+      password,
+    });
+    return signedMessage;
   }
 
   @backgroundMethod()
@@ -1218,8 +1190,8 @@ class Engine {
     accountId: string;
     encodedTx: any;
   }) {
-    const vault = await this.vaultFactory.getVault({ networkId, accountId });
-
+    const vault = await this.getVault({ networkId, accountId });
+    // throw new Error('test fetch fee info error');
     return vault.fetchFeeInfo(encodedTx);
   }
 
@@ -1237,7 +1209,7 @@ class Engine {
     amount: string;
     spender: string;
   }) {
-    const vault = await this.vaultFactory.getVault({ networkId, accountId });
+    const vault = await this.getVault({ networkId, accountId });
     const { address } = await this.getAccount(accountId, networkId);
     return vault.buildEncodedTxFromApprove({
       token,
@@ -1251,16 +1223,14 @@ class Engine {
   async attachFeeInfoToEncodedTx(params: {
     networkId: string;
     accountId: string;
-    encodedTx: IEncodedTxAny;
+    encodedTx: IEncodedTx;
     feeInfoValue: IFeeInfoUnit;
-  }): Promise<IEncodedTxAny> {
+  }): Promise<IEncodedTx> {
     const { networkId, accountId } = params;
-    const vault = await this.vaultFactory.getVault({ networkId, accountId });
-    const txWithFee: IEncodedTxAny = await vault.attachFeeInfoToEncodedTx(
-      params,
-    );
+    const vault = await this.getVault({ networkId, accountId });
+    const txWithFee: IEncodedTx = await vault.attachFeeInfoToEncodedTx(params);
     debugLogger.sendTx('attachFeeInfoToEncodedTx', txWithFee);
-    return txWithFee as unknown;
+    return txWithFee;
   }
 
   @backgroundMethod()
@@ -1268,13 +1238,26 @@ class Engine {
     networkId,
     accountId,
     encodedTx,
+    payload,
   }: {
     networkId: string;
     accountId: string;
-    encodedTx: IEncodedTxAny;
-  }) {
-    const vault = await this.vaultFactory.getVault({ networkId, accountId });
-    return vault.decodeTx(encodedTx);
+    encodedTx: IEncodedTx;
+    payload?: any;
+  }): Promise<{
+    decodedTxLegacy: IDecodedTxLegacy;
+    decodedTx: IDecodedTx;
+  }> {
+    const vault = await this.getVault({ networkId, accountId });
+    const decodedTx = await vault.decodeTx(encodedTx, payload);
+    const decodedTxLegacy = await vault.decodedTxToLegacy(decodedTx);
+    if ((await vault.getNetworkImpl()) === IMPL_EVM) {
+      // do something in EVM
+    }
+    return {
+      decodedTx,
+      decodedTxLegacy,
+    };
   }
 
   @backgroundMethod()
@@ -1287,11 +1270,11 @@ class Engine {
   }: {
     networkId: string;
     accountId: string;
-    encodedTx: IEncodedTxAny;
+    encodedTx: IEncodedTx;
     payload: any;
     options: IEncodedTxUpdateOptions;
   }) {
-    const vault = await this.vaultFactory.getVault({ networkId, accountId });
+    const vault = await this.getVault({ networkId, accountId });
     return vault.updateEncodedTx(encodedTx, payload, options);
   }
 
@@ -1304,10 +1287,10 @@ class Engine {
   }: {
     networkId: string;
     accountId: string;
-    encodedTx: IEncodedTxAny;
+    encodedTx: IEncodedTx;
     amount: string;
   }) {
-    const vault = await this.vaultFactory.getVault({ networkId, accountId });
+    const vault = await this.getVault({ networkId, accountId });
     return vault.updateEncodedTxTokenApprove(encodedTx, amount);
   }
 
@@ -1321,63 +1304,24 @@ class Engine {
     accountId: string;
     transferInfo: ITransferInfo;
   }) {
-    const vault = await this.vaultFactory.getVault({ networkId, accountId });
-    const result = await vault.buildEncodedTxFromTransfer(transferInfo);
-    debugLogger.sendTx('buildEncodedTxFromTransfer: ', transferInfo, result, {
-      networkId,
-      accountId,
-    });
+    const transferInfoNew = {
+      ...transferInfo,
+    };
+    transferInfoNew.amount = transferInfoNew.amount || '0';
+    // throw new Error('build encodedtx error test');
+    const vault = await this.getVault({ networkId, accountId });
+    const result = await vault.buildEncodedTxFromTransfer(transferInfoNew);
+    debugLogger.sendTx(
+      'buildEncodedTxFromTransfer: ',
+      transferInfoNew,
+      result,
+      {
+        networkId,
+        accountId,
+      },
+    );
     // eslint-disable-next-line @typescript-eslint/no-unsafe-return
     return result;
-  }
-
-  @backgroundMethod()
-  async prepareTransfer(
-    networkId: string,
-    accountId: string,
-    to: string,
-    value: string,
-    tokenIdOnNetwork?: string,
-    extra?: { [key: string]: any },
-  ): Promise<string> {
-    console.error('prepareTransfer is deprecated!');
-    // For account model networks, return the estimated gas usage.
-    // TODO: For UTXO model networks, return the transaction size & selected UTXOs.
-    // TODO: validate to parameter.
-    let token: Token | undefined;
-    if (
-      typeof tokenIdOnNetwork !== 'undefined' &&
-      tokenIdOnNetwork.length > 0
-    ) {
-      const normalizedAddress = await this.validator.validateTokenAddress(
-        networkId,
-        tokenIdOnNetwork,
-      );
-      token = await this.getOrAddToken(networkId, normalizedAddress, true);
-    }
-    await Promise.all([
-      this.validator.validateAddress(networkId, to),
-      this.validator.validateTransferValue(value),
-    ]);
-    const [network, dbAccount] = await Promise.all([
-      this.getNetwork(networkId),
-      this.dbApi.getAccount(accountId),
-    ]);
-
-    // Below properties are used to avoid redundant network requests.
-    const payload = extra || {};
-    payload.nonce = 1;
-    payload.feePricePerUnit = new BigNumber(1);
-    return (
-      await this.providerManager.preSend(
-        network,
-        dbAccount,
-        to,
-        new BigNumber(value),
-        token,
-        payload,
-      )
-    ).toFixed();
   }
 
   @backgroundMethod()
@@ -1392,9 +1336,31 @@ class Engine {
     return ret as Array<EIP1559Fee>;
   }
 
-  async getVault(options: IVaultFactoryOptions) {
+  async getVault(options: { networkId: string; accountId: string }) {
     return this.vaultFactory.getVault(options);
   }
+
+  async getChainOnlyVault(networkId: string) {
+    return this.vaultFactory.getChainOnlyVault(networkId);
+  }
+
+  async getWalletOnlyVault(networkId: string, walletId: string) {
+    return this.vaultFactory.getWalletOnlyVault(networkId, walletId);
+  }
+
+  getVaultSettings = memoizee(
+    async (networkId: string) => {
+      const vault = await this.getChainOnlyVault(networkId);
+      return vault.settings;
+    },
+    {
+      promise: true,
+      primitive: true,
+      max: 50,
+      maxAge: 1000 * 60 * 60,
+      normalizer: (args) => `${args[0]}`,
+    },
+  );
 
   @backgroundMethod()
   async addHistoryEntry({
@@ -1404,6 +1370,7 @@ class Engine {
     type,
     status,
     meta,
+    payload,
   }: {
     id: string;
     networkId: string;
@@ -1411,7 +1378,35 @@ class Engine {
     type: HistoryEntryType;
     status: HistoryEntryStatus;
     meta: HistoryEntryMeta;
+    payload?: SendConfirmPayload;
   }) {
+    const network = await this.getNetwork(networkId);
+    // TODO only save history on EVM
+    if (network.impl !== IMPL_EVM) {
+      return;
+    }
+
+    if ('rawTx' in meta && !meta.rawTxPreDecodeCache) {
+      let rawTxPreDecoded: string | undefined;
+
+      try {
+        const vaultHelper = createVaultHelperInstance({
+          networkId,
+          accountId,
+        });
+        const nativeTx = await vaultHelper.parseToNativeTx(meta.rawTx);
+        rawTxPreDecoded = await vaultHelper.nativeTxToJson(nativeTx);
+      } catch (error) {
+        console.error(error);
+      }
+
+      meta.rawTxPreDecodeCache = rawTxPreDecoded;
+
+      if (payload && !meta.payload) {
+        meta.payload = JSON.stringify(payload);
+      }
+    }
+
     await this.dbApi.addHistoryEntry(
       id,
       networkId,
@@ -1421,182 +1416,6 @@ class Engine {
       meta,
     );
   }
-
-  @backgroundMethod()
-  async transfer(
-    password: string,
-    networkId: string, // "evm--97"
-    accountId: string, // "hd-1--m/44'/60'/0'/0/0"
-    to: string,
-    value: string,
-    gasPrice: string,
-    gasLimit: string,
-    tokenIdOnNetwork?: string,
-    extra?: { [key: string]: any },
-  ): Promise<{ txid: string; success: boolean }> {
-    console.error('transfer is deprecated!');
-    // TODO transferValidator
-    /*
-    let token: Token | undefined;
-    if (
-      typeof tokenIdOnNetwork !== 'undefined' &&
-      tokenIdOnNetwork.length > 0
-    ) {
-      const normalizedAddress = await this.validator.validateTokenAddress(
-        networkId,
-        tokenIdOnNetwork,
-      );
-      token = await this.getOrAddToken(networkId, normalizedAddress, true);
-    }
-    await Promise.all([
-      this.validator.validateAddress(networkId, to),
-      this.validator.validateTransferValue(value),
-    ]);
-
-    const [credential, network, dbAccount] = await Promise.all([
-      this.getCredentialSelectorForAccount(accountId, password),
-      this.getNetwork(networkId),
-      this.dbApi.getAccount(accountId),
-    ]);
-    */
-    debugLogger.engine('transfer:', {
-      password: '***',
-      networkId,
-      accountId,
-      to,
-      value,
-      gasPrice,
-      gasLimit,
-      tokenIdOnNetwork,
-      extra,
-    });
-    const vault = await this.getVault({
-      accountId,
-      networkId,
-    });
-
-    try {
-      const { txid, rawTx } = await vault.simpleTransfer(
-        {
-          to,
-          value,
-          tokenIdOnNetwork,
-          extra,
-          gasLimit,
-          gasPrice,
-        },
-        { password },
-      );
-      const historyId = `${networkId}--${txid}`;
-      await this.dbApi.addHistoryEntry(
-        historyId,
-        networkId,
-        accountId,
-        HistoryEntryType.TRANSFER,
-        HistoryEntryStatus.PENDING,
-        {
-          contract: tokenIdOnNetwork || '',
-          target: to,
-          value,
-          rawTx,
-        },
-      );
-      return { txid, success: true };
-    } catch (e) {
-      console.error(e);
-      const { message } = e as { message: string };
-      throw new FailedToTransfer(message);
-    }
-  }
-
-  @backgroundMethod()
-  async signMessage(
-    password: string,
-    networkId: string,
-    accountId: string,
-    messages: Array<Message>,
-    ref?: string,
-  ): Promise<Array<string>> {
-    // TODO: address check needed?
-    const [credential, network, dbAccount] = await Promise.all([
-      this.getCredentialSelectorForAccount(accountId, password),
-      this.getNetwork(networkId),
-      this.dbApi.getAccount(accountId),
-    ]);
-
-    const signatures = await this.providerManager.signMessages(
-      credential,
-      password,
-      network,
-      dbAccount,
-      messages,
-    );
-    const now = Date.now();
-    await Promise.all(
-      signatures.map((signature, index) =>
-        this.dbApi.addHistoryEntry(
-          `${networkId}--m-${now}-${index}`,
-          networkId,
-          accountId,
-          HistoryEntryType.SIGN,
-          HistoryEntryStatus.SIGNED,
-          { message: JSON.stringify(messages[index]), ref: ref || '' },
-        ),
-      ),
-    );
-    return signatures;
-  }
-
-  @backgroundMethod()
-  async signTransaction(
-    password: string,
-    networkId: string,
-    accountId: string,
-    transactions: Array<string>,
-    overwriteParams?: string,
-    _ref?: string,
-    autoBroadcast = true,
-  ): Promise<Array<string>> {
-    const [credentialSelector, network, dbAccount] = await Promise.all([
-      this.getCredentialSelectorForAccount(accountId, password),
-      this.getNetwork(networkId),
-      this.dbApi.getAccount(accountId),
-    ]);
-    const ret: Array<string> = [];
-    try {
-      const txsWithStatus = await this.providerManager.signTransactions(
-        credentialSelector,
-        network,
-        dbAccount,
-        transactions,
-        overwriteParams,
-        autoBroadcast,
-      );
-      txsWithStatus.forEach(async (tx) => {
-        ret.push(autoBroadcast ? tx.txid : tx.rawTx);
-        const meta = { ...tx.txMeta, rawTx: tx.rawTx };
-        await this.dbApi.addHistoryEntry(
-          `${networkId}--${tx.txid}`,
-          networkId,
-          accountId,
-          HistoryEntryType.TRANSACTION,
-          autoBroadcast && tx.success
-            ? HistoryEntryStatus.PENDING
-            : HistoryEntryStatus.SIGNED,
-          meta as HistoryEntryMeta,
-        );
-      });
-    } catch (e) {
-      const { message } = e as { message: string };
-      throw new FailedToTransfer(message);
-    }
-
-    return Promise.resolve(ret);
-  }
-
-  // TODO: sign & broadcast.
-  // signTransaction
-  // broadcastRawTransaction
 
   async getHistory(
     networkId: string,
@@ -1613,20 +1432,14 @@ class Engine {
       contract,
       before,
     );
+    const vault = await this.getVault({
+      accountId,
+      networkId,
+    });
+
     let updatedStatusMap: Record<string, HistoryEntryStatus> = {};
-
     if (updatePending) {
-      const pendings = entries.filter(
-        (entry) => entry.status === HistoryEntryStatus.PENDING,
-      );
-
-      updatedStatusMap = await this.providerManager.refreshPendingTxs(
-        networkId,
-        pendings,
-      );
-      if (Object.keys(updatedStatusMap).length > 0) {
-        await this.dbApi.updateHistoryEntryStatuses(updatedStatusMap);
-      }
+      updatedStatusMap = await vault.updatePendingTxs(entries);
     }
 
     return entries.map((entry) => {
@@ -1645,13 +1458,21 @@ class Engine {
   @backgroundMethod()
   async listNetworks(enabledOnly = true): Promise<Array<Network>> {
     const networks = await this.dbApi.listNetworks();
-    return networks
-      .filter(
-        (dbNetwork) =>
-          (enabledOnly ? dbNetwork.enabled : true) &&
-          getSupportedImpls().has(dbNetwork.impl),
-      )
-      .map((dbNetwork) => fromDBNetworkToNetwork(dbNetwork));
+    return Promise.all(
+      networks
+        .filter(
+          (dbNetwork) =>
+            (enabledOnly ? dbNetwork.enabled : true) &&
+            getSupportedImpls().has(dbNetwork.impl),
+        )
+        .map(async (dbNetwork) => this.dbNetworkToNetwork(dbNetwork)),
+    );
+  }
+
+  async dbNetworkToNetwork(dbNetwork: DBNetwork) {
+    const settings = await this.getVaultSettings(dbNetwork.id);
+    const network = fromDBNetworkToNetwork(dbNetwork, settings);
+    return network;
   }
 
   @backgroundMethod()
@@ -1685,15 +1506,16 @@ class Engine {
   }
 
   @backgroundMethod()
-  getRPCEndpointStatus(
+  async getRPCEndpointStatus(
     rpcURL: string,
-    impl: string,
+    networkId: string,
   ): Promise<{ responseTime: number; latestBlock: number }> {
     if (rpcURL.length === 0) {
       throw new OneKeyInternalError('Empty RPC URL.');
     }
 
-    return getRPCStatus(rpcURL, impl);
+    const vault = await this.getChainOnlyVault(networkId);
+    return vault.getClientEndpointStatus(rpcURL);
   }
 
   @backgroundMethod()
@@ -1734,13 +1556,14 @@ class Engine {
     const dbObj = await this.dbApi.addNetwork(
       getEVMNetworkToCreate(`${impl}--${networkId}`, params),
     );
-    return fromDBNetworkToNetwork(dbObj);
+    return this.dbNetworkToNetwork(dbObj);
   }
 
   @backgroundMethod()
   async getNetwork(networkId: string): Promise<Network> {
     const dbObj = await this.dbApi.getNetwork(networkId);
-    return fromDBNetworkToNetwork(dbObj);
+    // this.dbNetworkToNetwork(dbObj) may cause cycle calling
+    return fromDBNetworkToNetwork(dbObj, {} as IVaultSettings);
   }
 
   @backgroundMethod()
@@ -1789,7 +1612,7 @@ class Engine {
     }
     // TODO: chain interaction to check rpc url works correctly.
     const dbObj = await this.dbApi.updateNetwork(networkId, params);
-    return fromDBNetworkToNetwork(dbObj);
+    return this.dbNetworkToNetwork(dbObj);
   }
 
   @backgroundMethod()
@@ -1801,118 +1624,94 @@ class Engine {
   }
 
   @backgroundMethod()
-  async getRPCEndpoints(networkId: string): Promise<Array<string>> {
+  async getRPCEndpoints(
+    networkId: string,
+  ): Promise<{ urls: Array<string>; defaultRpcURL: string }> {
     // List preset/saved rpc endpoints of a network.
     const network = await this.dbApi.getNetwork(networkId);
     const presetNetworks = getPresetNetworks();
     const { presetRpcURLs } = presetNetworks[networkId] || {
       presetRpcURLs: [],
     };
-    return [network.rpcURL].concat(
+    const defaultRpcURL = presetRpcURLs[0] || network.rpcURL;
+    const urls = [network.rpcURL].concat(
       presetRpcURLs.filter((url) => url !== network.rpcURL),
     );
+    return { urls, defaultRpcURL };
   }
 
   @backgroundMethod()
   async getTxHistories(
     networkId: string,
     accountId: string,
-    pageNumber: number,
-    pageSize: number,
-    pending = true,
+    filterOptions?: {
+      isLocalOnly?: boolean;
+      isHidePending?: boolean;
+      contract?: string | null;
+    },
   ) {
     const [dbAccount, network] = await Promise.all([
       this.dbApi.getAccount(accountId),
       this.getNetwork(networkId),
     ]);
 
+    if (network.impl === IMPL_BTC) {
+      const vault = (await this.getVault({ networkId, accountId })) as BTCVault;
+      return vault.getHistory();
+    }
+
+    // TODO filter EVM history only
     if (network.impl !== IMPL_EVM) {
-      return { data: null, error: false, errorMessage: null, errorCode: null };
+      return [];
     }
 
-    if (typeof dbAccount === 'undefined') {
-      return { data: null, error: false, errorMessage: null, errorCode: null };
-    }
+    const MAX_SIZE = 50;
+    const localHistory = await this.getHistory(
+      networkId,
+      accountId,
+      undefined,
+      true,
+      MAX_SIZE,
+    );
 
-    if (dbAccount.type !== AccountType.SIMPLE) {
-      return { data: null, error: false, errorMessage: null, errorCode: null };
-    }
-    const chainId = network.id.split(SEPERATOR)[1];
-
-    if (!pending) {
-      return getTxHistories(chainId, dbAccount.address, pageNumber, pageSize);
-    }
-
-    const localHistory = await this.getHistory(networkId, accountId);
     const localTxHistory = localHistory.filter<HistoryEntryTransaction>(
       (h): h is HistoryEntryTransaction => 'rawTx' in h,
     );
 
-    const decodedLocalTxHistory = localTxHistory.map(async (h) => {
-      const decodedItem = await EVMTxDecoder.decode(h.rawTx, this);
-      const tx = decodedItemToTransaction(decodedItem, h);
-      return tx;
-    });
+    let filtedHistory = localTxHistory;
+    if (filterOptions) {
+      const { contract, isHidePending } = filterOptions;
 
-    const decodedLocalTxHistoryList = await Promise.all(decodedLocalTxHistory);
+      if (contract) {
+        filtedHistory = localTxHistory.filter((h) => h.contract === contract);
+      }
 
-    const covalent = await getTxHistories(
-      chainId,
+      if (isHidePending) {
+        filtedHistory = filtedHistory.filter(
+          (h) => h.status !== HistoryEntryStatus.PENDING,
+        );
+      }
+    }
+
+    const txs = getMergedTxs(
+      filtedHistory,
+      network,
       dbAccount.address,
-      pageNumber,
-      pageSize,
+      this,
+      filterOptions?.contract,
+      filterOptions?.isLocalOnly,
     );
-    if (!covalent || !covalent.data.txList) {
-      throw new OneKeyInternalError('getTxHistories failed.');
-    }
-    const { txList } = covalent.data;
-    updateLocalTransactions(decodedLocalTxHistoryList, txList);
 
-    const localTxHashSet = new Set(
-      decodedLocalTxHistoryList.map((tx) => tx.txHash),
-    );
-    const filtedTxList = txList.filter((tx) => !localTxHashSet.has(tx.txHash));
-    covalent.data.txList = [...decodedLocalTxHistoryList, ...filtedTxList];
-    return covalent;
-  }
-
-  async getErc20TxHistories(
-    networkId: string,
-    accountId: string,
-    contract: string,
-    pageNumber: number,
-    pageSize: number,
-  ) {
-    const [dbAccount, network] = await Promise.all([
-      this.dbApi.getAccount(accountId),
-      this.getNetwork(networkId),
-    ]);
-
-    if (network.impl !== IMPL_EVM) {
-      return { data: null, error: false, errorMessage: null, errorCode: null };
-    }
-
-    if (typeof dbAccount === 'undefined') {
-      return { data: null, error: false, errorMessage: null, errorCode: null };
-    }
-
-    if (dbAccount.type !== AccountType.SIMPLE) {
-      return { data: null, error: false, errorMessage: null, errorCode: null };
-    }
-
-    const chainId = network.id.split(SEPERATOR)[1];
-    return getErc20TransferHistories(
-      chainId,
-      dbAccount.address,
-      contract,
-      pageNumber,
-      pageSize,
-    );
+    return txs;
   }
 
   @backgroundMethod()
-  proxyRPCCall<T>(networkId: string, request: IJsonRpcRequest): Promise<T> {
-    return this.providerManager.proxyRPCCall(networkId, request);
+  async proxyJsonRPCCall<T>(
+    networkId: string,
+    request: IJsonRpcRequest,
+  ): Promise<T> {
+    const vault = await this.getChainOnlyVault(networkId);
+    return vault.proxyJsonRPCCall(request);
   }
 
   @backgroundMethod()

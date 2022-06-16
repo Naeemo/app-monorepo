@@ -5,22 +5,22 @@ import { useIntl } from 'react-intl';
 import { Dialog } from '@onekeyhq/components';
 
 export type DappOpenHintDialogProps = {
-  visible: boolean;
   onVisibilityChange: (visible: boolean) => void;
   onConfirm: () => void;
+  onClose?: () => void;
 };
 
 const DappOpenHintDialog: FC<DappOpenHintDialogProps> = ({
-  visible,
   onVisibilityChange,
   onConfirm,
+  onClose,
 }) => {
   const intl = useIntl();
 
   return (
     <Dialog
+      visible
       hasFormInsideDialog
-      visible={visible}
       onClose={() => {
         onVisibilityChange?.(false);
       }}
@@ -37,6 +37,10 @@ const DappOpenHintDialog: FC<DappOpenHintDialogProps> = ({
         primaryActionTranslationId: 'action__i_got_it',
         onPrimaryActionPress: () => {
           onConfirm?.();
+          onClose?.();
+        },
+        onSecondaryActionPress: () => {
+          onClose?.();
         },
       }}
     />

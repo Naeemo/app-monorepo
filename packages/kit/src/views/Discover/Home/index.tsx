@@ -15,7 +15,7 @@ import {
   Box,
   Empty,
   FlatList,
-  Image,
+  NetImage,
   Pressable,
   Spinner,
   Typography,
@@ -33,18 +33,21 @@ import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
 import { useDiscover } from '../../../hooks/redux';
 import DAppIcon from '../DAppIcon';
+import { MatchDAppItemType } from '../Explorer/Search/useSearchHistories';
 import { imageUrl, requestRankings, requestSync } from '../Service';
 import { DAppItemType, RankingsPayload, SyncRequestPayload } from '../type';
 
 import CardView from './CardView';
-import DiscoverIOS from './DiscoverIOS';
+import DiscoverNative from './DiscoverNative';
 import ListView from './ListView';
-import { SectionDataType } from './type';
+
+import type { SectionDataType } from './type';
 
 type RouteProps = RouteProp<HomeRoutesParams, HomeRoutes.ExploreScreen>;
 
 type DiscoverProps = {
   onItemSelect: (item: DAppItemType) => Promise<boolean>;
+  onItemSelectHistory: (item: MatchDAppItemType) => Promise<boolean>;
 };
 
 const Banner: FC<SectionDataType> = ({ data, onItemSelect }) => {
@@ -56,26 +59,35 @@ const Banner: FC<SectionDataType> = ({ data, onItemSelect }) => {
     ({ item }) => {
       const url = imageUrl(item.pic ?? '');
       return (
-        <Pressable
-          onPress={() => {
-            if (onItemSelect) {
-              onItemSelect(item);
-            }
-          }}
+        <Box
+          padding="8px"
+          justifyContent="center"
+          alignItems="center"
+          width={isSmallScreen ? '310px' : `${cardWidth + 16}px`}
+          height={isSmallScreen ? '258px' : `285px`}
         >
-          <Box
+          <Pressable
+            onPress={() => {
+              if (onItemSelect) {
+                onItemSelect(item);
+              }
+            }}
             width={isSmallScreen ? '294px' : `${cardWidth}px`}
             height="100%"
             bgColor="surface-default"
-            ml="16px"
             borderRadius="12px"
             padding="12px"
+            borderWidth={1}
+            borderColor="border-subdued"
+            _hover={{
+              bg: 'surface-hovered',
+            }}
           >
-            <Image
-              width={isSmallScreen ? '270px' : `${cardWidth - 24}px`}
-              height={isSmallScreen ? '134px' : '177px'}
-              src={url}
-              borderRadius="12px"
+            <NetImage
+              width={isSmallScreen ? 270 : cardWidth}
+              height={isSmallScreen ? 134 : 177}
+              uri={url}
+              borderRadius={12}
             />
             <Box mt="12px" flexDirection="row" alignItems="center">
               <DAppIcon size={28} favicon={item.favicon} chain={item.chain} />
@@ -90,8 +102,8 @@ const Banner: FC<SectionDataType> = ({ data, onItemSelect }) => {
             >
               {item.subtitle}
             </Typography.Caption>
-          </Box>
-        </Pressable>
+          </Pressable>
+        </Box>
       );
     },
     [cardWidth, isSmallScreen, onItemSelect],
@@ -104,9 +116,9 @@ const Banner: FC<SectionDataType> = ({ data, onItemSelect }) => {
         })}
       </Typography.PageHeading>
       <FlatList
-        mt="32px"
+        mt="24px"
         contentContainerStyle={{
-          paddingLeft: isSmallScreen ? 0 : 16,
+          paddingLeft: isSmallScreen ? 8 : 24,
           paddingRight: 16,
         }}
         showsHorizontalScrollIndicator={false}
@@ -127,7 +139,7 @@ export const Discover: FC<DiscoverProps> = ({
 }) => {
   let onItemSelect: ((item: DAppItemType) => Promise<boolean>) | undefined;
   const route = useRoute<RouteProps>();
-  if (platformEnv.isIOS) {
+  if (platformEnv.isNative) {
     const { onItemSelect: routeOnItemSelect } = route.params;
     onItemSelect = routeOnItemSelect;
   } else {
@@ -145,7 +157,7 @@ export const Discover: FC<DiscoverProps> = ({
   );
 
   useLayoutEffect(() => {
-    if (platformEnv.isIOS) {
+    if (platformEnv.isNative) {
       navigation.setOptions({
         title: intl.formatMessage({
           id: 'title__explore',
@@ -157,7 +169,7 @@ export const Discover: FC<DiscoverProps> = ({
   const callback = useCallback(
     (item: DAppItemType) => {
       // iOS 弹窗无法展示在 modal 上面并且页面层级多一层，提前返回一层。
-      if (platformEnv.isIOS) {
+      if (platformEnv.isNative) {
         navigation.goBack();
       }
       return onItemSelect?.(item) ?? Promise.resolve(false);
@@ -227,7 +239,7 @@ export const Discover: FC<DiscoverProps> = ({
     } else {
       setPageStatus('loading');
     }
-    if (platformEnv.isIOS) {
+    if (platformEnv.isNative) {
       requestRankings()
         .then((response2) => {
           setPageStatus('data');
@@ -312,6 +324,6 @@ export const Discover: FC<DiscoverProps> = ({
 };
 
 const Home: FC<DiscoverProps> = ({ ...rest }) =>
-  platformEnv.isIOS ? <DiscoverIOS {...rest} /> : <Discover {...rest} />;
+  platformEnv.isNative ? <DiscoverNative {...rest} /> : <Discover {...rest} />;
 
 export default Home;

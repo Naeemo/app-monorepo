@@ -18,7 +18,9 @@ import {
   Empty,
   Modal,
   Spinner,
+  ToastManager,
   Typography,
+  useToast,
 } from '@onekeyhq/components';
 import type {
   Account,
@@ -27,7 +29,6 @@ import type {
 import IconAccount from '@onekeyhq/kit/assets/3d_account.png';
 import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
 import { useRuntime } from '@onekeyhq/kit/src/hooks/redux';
-import { useToast } from '@onekeyhq/kit/src/hooks/useToast';
 import {
   CreateAccountModalRoutes,
   CreateAccountRoutesParams,
@@ -139,9 +140,25 @@ const RecoverAccounts: FC = () => {
               return { ...item, selected: isDisabled, isDisabled };
             }),
           ]);
+        })
+        .catch((e) => {
+          ToastManager.show({
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+            title: intl.formatMessage({ id: e?.message ?? '' }),
+          });
+          navigation?.goBack?.();
+          navigation?.goBack?.();
         });
     },
-    [currentPage, getActiveAccount, network, password, walletId],
+    [
+      currentPage,
+      getActiveAccount,
+      network,
+      password,
+      walletId,
+      intl,
+      navigation,
+    ],
   );
 
   const checkBoxOnChange = useCallback(

@@ -3,19 +3,45 @@
 import { defaultAbiCoder } from '@ethersproject/abi';
 import { ethers } from '@onekeyfe/blockchain-libs';
 import { toBigIntHex } from '@onekeyfe/blockchain-libs/dist/basic/bignumber-plus';
-import { UnsignedTx } from '@onekeyfe/blockchain-libs/dist/types/provider';
+import { Geth } from '@onekeyfe/blockchain-libs/dist/provider/chains/eth/geth';
+import { Provider as EthProvider } from '@onekeyfe/blockchain-libs/dist/provider/chains/eth/provider';
+import { decrypt } from '@onekeyfe/blockchain-libs/dist/secret/encryptors/aes256';
+import {
+  PartialTokenInfo,
+  TransactionStatus,
+  UnsignedTx,
+} from '@onekeyfe/blockchain-libs/dist/types/provider';
+import { IJsonRpcRequest } from '@onekeyfe/cross-inpage-provider-types';
 import BigNumber from 'bignumber.js';
-import { isNil } from 'lodash';
+import { isNil, merge } from 'lodash';
 
 import debugLogger from '@onekeyhq/shared/src/logger/debugLogger';
 
-import { NotImplemented } from '../../../errors';
-import { fillUnsignedTx, fillUnsignedTxObj } from '../../../proxy';
+import {
+  NotImplemented,
+  OneKeyInternalError,
+  PendingQueueTooLong,
+} from '../../../errors';
+import {
+  extractResponseError,
+  fillUnsignedTx,
+  fillUnsignedTxObj,
+} from '../../../proxy';
 import { DBAccount } from '../../../types/account';
+import { UserCreateInputCategory } from '../../../types/credential';
+import {
+  HistoryEntry,
+  HistoryEntryStatus,
+  HistoryEntryTransaction,
+} from '../../../types/history';
+import { ETHMessage, ETHMessageTypes } from '../../../types/message';
 import { EIP1559Fee, EvmExtraInfo } from '../../../types/network';
+import { KeyringSoftwareBase } from '../../keyring/KeyringSoftwareBase';
 import {
   IApproveInfo,
-  IEncodedTxAny,
+  IDecodedTx,
+  IDecodedTxLegacy,
+  IEncodedTx,
   IEncodedTxUpdateOptions,
   IEncodedTxUpdatePayloadTokenApprove,
   IEncodedTxUpdatePayloadTransfer,
@@ -24,7 +50,8 @@ import {
   IFeeInfoUnit,
   ISignCredentialOptions,
   ITransferInfo,
-} from '../../../types/vault';
+  IUserInputGuessingResult,
+} from '../../types';
 import { VaultBase } from '../../VaultBase';
 
 import { Erc20MethodSelectors } from './decoder/abi';
@@ -37,21 +64,31 @@ import {
   InfiniteAmountHex,
   InfiniteAmountText,
 } from './decoder/decoder';
+import { getTxCount } from './decoder/util';
 import { KeyringHardware } from './KeyringHardware';
 import { KeyringHd } from './KeyringHd';
 import { KeyringImported } from './KeyringImported';
 import { KeyringWatching } from './KeyringWatching';
+import settings from './settings';
+
+const PENDING_QUEUE_MAX_LENGTH = 10;
+const OPTIMISM_NETWORKS = ['evm--10', 'evm--69'];
+
+export type IUnsignedMessageEvm = ETHMessage & {
+  payload?: any;
+};
 
 export type IEncodedTxEvm = {
   from: string;
   to: string;
   value: string;
-  data: string;
+  data?: string;
   gas?: string; // alias for gasLimit
   gasLimit?: string;
   gasPrice?: string;
   maxFeePerGas?: string;
   maxPriorityFeePerGas?: string;
+  nonce?: number;
 };
 
 export enum IDecodedTxEvmType {
@@ -77,6 +114,8 @@ function decodeUnsignedTxFeeData(unsignedTx: UnsignedTx) {
 }
 
 export default class Vault extends VaultBase {
+  settings = settings;
+
   keyringMap = {
     hd: KeyringHd,
     hw: KeyringHardware,
@@ -89,6 +128,12 @@ export default class Vault extends VaultBase {
       this.networkId,
       dbAccount,
     );
+  }
+
+  private async getJsonRPCClient(): Promise<Geth> {
+    return (await this.engine.providerManager.getClient(
+      this.networkId,
+    )) as Geth;
   }
 
   async simpleTransfer(
@@ -128,7 +173,16 @@ export default class Vault extends VaultBase {
     return this.signAndSendTransaction(unsignedTx, options);
   }
 
-  override async decodeTx(encodedTx: IEncodedTxAny): Promise<EVMDecodedItem> {
+  // @ts-ignore
+  decodedTxToLegacy(decodedTx: IDecodedTxLegacy): Promise<IDecodedTxLegacy> {
+    return Promise.resolve(decodedTx);
+  }
+
+  // @ts-ignore
+  override async decodeTx(
+    encodedTx: IEncodedTx,
+    payload?: any,
+  ): Promise<IDecodedTxLegacy> {
     const ethersTx = (await this.helper.parseToNativeTx(
       encodedTx,
     )) as ethers.Transaction;
@@ -136,22 +190,18 @@ export default class Vault extends VaultBase {
     if (!Number.isFinite(ethersTx.chainId)) {
       ethersTx.chainId = Number(await this.getNetworkChainId());
     }
-    return EVMTxDecoder.decode(ethersTx, this.engine);
+    return EVMTxDecoder.getDecoder(this.engine).decode(ethersTx, payload);
   }
 
   async buildEncodedTxFromTransfer(
     transferInfo: ITransferInfo,
   ): Promise<IEncodedTxEvm> {
     const network = await this.getNetwork();
-    const isMax = transferInfo.max;
     const isTransferToken = Boolean(transferInfo.token);
     const isTransferNativeToken = !isTransferToken;
     const { amount } = transferInfo;
     let amountBN = new BigNumber(amount);
     if (amountBN.isNaN()) {
-      amountBN = new BigNumber('0');
-    }
-    if (isMax && isTransferNativeToken) {
       amountBN = new BigNumber('0');
     }
 
@@ -195,10 +245,7 @@ export default class Vault extends VaultBase {
     const [network, token, spender] = await Promise.all([
       this.getNetwork(),
       this.engine.getOrAddToken(this.networkId, approveInfo.token),
-      this.engine.validator.validateAddress(
-        this.networkId,
-        approveInfo.spender,
-      ),
+      this.validateAddress(approveInfo.spender),
     ]);
     if (typeof token === 'undefined') {
       throw new Error(`Token not found: ${approveInfo.token}`);
@@ -224,10 +271,10 @@ export default class Vault extends VaultBase {
   }
 
   async updateEncodedTx(
-    encodedTx: IEncodedTxAny,
+    encodedTx: IEncodedTxEvm,
     payload: any,
     options: IEncodedTxUpdateOptions,
-  ): Promise<IEncodedTxAny> {
+  ): Promise<IEncodedTxEvm> {
     if (options.type === IEncodedTxUpdateType.tokenApprove) {
       const p = payload as IEncodedTxUpdatePayloadTokenApprove;
       return this.updateEncodedTxTokenApprove(encodedTx, p.amount);
@@ -241,7 +288,7 @@ export default class Vault extends VaultBase {
   async updateEncodedTxTransfer(
     encodedTx: IEncodedTxEvm,
     payload: IEncodedTxUpdatePayloadTransfer,
-  ): Promise<IEncodedTxAny> {
+  ): Promise<IEncodedTxEvm> {
     const decodedTx = await this.decodeTx(encodedTx);
     const { amount } = payload;
     const amountBN = new BigNumber(amount);
@@ -308,6 +355,7 @@ export default class Vault extends VaultBase {
       gasPrice,
       maxFeePerGas,
       maxPriorityFeePerGas,
+      nonce,
       ...others
     } = encodedTx;
     debugLogger.sendTx(
@@ -330,6 +378,10 @@ export default class Vault extends VaultBase {
         feePricePerUnit: !isNil(gasPrice) ? new BigNumber(gasPrice) : undefined,
         maxFeePerGas,
         maxPriorityFeePerGas,
+        nonce:
+          typeof nonce !== 'undefined'
+            ? nonce
+            : await this.getNextNonce(network.id, dbAccount),
         ...others,
       },
     });
@@ -354,41 +406,120 @@ export default class Vault extends VaultBase {
     return unsignedTx;
   }
 
+  _toNormalAmount(value: string, decimals: number) {
+    const valueBN = ethers.BigNumber.from(value);
+    return ethers.utils.formatUnits(valueBN, decimals);
+  }
+
   async fetchFeeInfo(encodedTx: IEncodedTxEvm): Promise<IFeeInfo> {
-    const [network, prices, unsignedTx] = await Promise.all([
-      this.getNetwork(),
+    // NOTE: for fetching gas limit, we don't want blockchain-libs to fetch
+    // other info such as gas price and nonce. Therefore the hack here to
+    // avoid redundant network requests.
+    // And extract gas & gasLimit to ensure always getting estimated gasLimit
+    // from blockchain.
+
+    const { gas, gasLimit, ...encodedTxWithFakePriceAndNonce } = {
+      ...encodedTx,
+      nonce: 1,
+      gasPrice: '1',
+    };
+
+    const network = await this.getNetwork();
+    const decodedTx = await this.decodeTx(encodedTx);
+    if (decodedTx.txType === EVMDecodedTxType.NATIVE_TRANSFER) {
+      // always use value=0 to calculate native transfer gas limit
+      encodedTxWithFakePriceAndNonce.value = '0x0';
+    }
+
+    // NOTE: gasPrice deleted in removeFeeInfoInTx() if encodedTx build by DAPP
+
+    const [prices, unsignedTx] = await Promise.all([
       this.engine.getGasPrice(this.networkId),
-      this.buildUnsignedTxFromEncodedTx(encodedTx),
+      // TODO add options params to control which fields should fetch in blockchain-libs
+      this.buildUnsignedTxFromEncodedTx(encodedTxWithFakePriceAndNonce),
     ]);
 
+    // For L2 networks with L1 fee.
+    let baseFeeValue = '0';
+    if (OPTIMISM_NETWORKS.includes(this.networkId)) {
+      // Optimism & Optimism Kovan
+      // call gasL1Fee(bytes) of GasPriceOracle at 0x420000000000000000000000000000000000000F
+      const txData = ethers.utils.serializeTransaction({
+        value: encodedTx.value,
+        data: encodedTx.data,
+        gasLimit: `0x${(unsignedTx.feeLimit ?? new BigNumber('0')).toString(
+          16,
+        )}`,
+        to: encodedTx.to,
+        chainId: 10, // any number other than 0 will lead to fixed length of data
+        gasPrice: '0xf4240', // 0.001 Gwei
+        nonce: 1,
+      });
+
+      // keccak256(Buffer.from('getL1Fee(bytes)')) => '0x49948e0e...'
+      const data = `0x49948e0e${defaultAbiCoder
+        .encode(['bytes'], [txData])
+        .slice(2)}`;
+      const client = await this.getJsonRPCClient();
+      const l1FeeHex = await client.rpc.call('eth_call', [
+        { to: '0x420000000000000000000000000000000000000F', data },
+        'latest',
+      ]);
+      baseFeeValue = new BigNumber(l1FeeHex as string)
+        .shiftedBy(-network.feeDecimals)
+        .toFixed();
+    }
+
     const eip1559 = Boolean(
-      prices?.length && prices?.every((gas) => typeof gas === 'object'),
+      prices?.length && prices?.every((price) => typeof price === 'object'),
     );
-    let priceInfo: string | EIP1559Fee | undefined = encodedTx.gasPrice;
+    let priceInfo: string | EIP1559Fee | undefined = encodedTx.gasPrice
+      ? this._toNormalAmount(encodedTx.gasPrice, network.feeDecimals)
+      : undefined;
     if (eip1559) {
-      priceInfo = {
-        ...(prices[0] as EIP1559Fee),
-        maxPriorityFeePerGas: encodedTx.maxPriorityFeePerGas,
-        maxFeePerGas: encodedTx.maxFeePerGas,
-      } as EIP1559Fee;
+      priceInfo = merge(
+        {
+          ...(prices[0] as EIP1559Fee),
+        },
+        {
+          maxPriorityFeePerGas: encodedTx.maxPriorityFeePerGas
+            ? this._toNormalAmount(
+                encodedTx.maxPriorityFeePerGas,
+                network.feeDecimals,
+              )
+            : undefined,
+          maxFeePerGas: encodedTx.maxFeePerGas
+            ? this._toNormalAmount(encodedTx.maxFeePerGas, network.feeDecimals)
+            : undefined,
+        },
+      ) as EIP1559Fee;
     }
     // [{baseFee: '928.361757873', maxPriorityFeePerGas: '11.36366', maxFeePerGas: '939.725417873'}]
     // [10]
-    const limit = unsignedTx.feeLimit?.toFixed();
+    const limit = BigNumber.max(
+      unsignedTx.feeLimit ?? '0',
+      gas ?? '0',
+      gasLimit ?? '0',
+    ).toFixed();
 
     return {
       nativeSymbol: network.symbol,
       nativeDecimals: network.decimals,
       symbol: network.feeSymbol,
-      decimals: network.feeDecimals, // TODO balance2FeeDecimals
+      decimals: network.feeDecimals,
+
+      eip1559,
       limit,
       prices,
-      eip1559,
+      defaultPresetIndex: '1',
+
+      // feeInfo in original tx
       tx: {
         eip1559,
-        limit: encodedTx.gas,
+        limit: encodedTx.gas ?? encodedTx.gasLimit,
         price: priceInfo,
       },
+      baseFeeValue,
     };
   }
 
@@ -401,6 +532,9 @@ export default class Vault extends VaultBase {
     const encodedTxWithFee = { ...encodedTx };
     if (!isNil(feeInfoValue.limit)) {
       encodedTxWithFee.gas = toBigIntHex(new BigNumber(feeInfoValue.limit));
+      encodedTxWithFee.gasLimit = toBigIntHex(
+        new BigNumber(feeInfoValue.limit),
+      );
     }
     // TODO to hex and shift decimals, do not shift decimals in fillUnsignedTxObj
     if (!isNil(feeInfoValue.price)) {
@@ -414,7 +548,7 @@ export default class Vault extends VaultBase {
             network.feeDecimals,
           ),
         );
-        encodedTxWithFee.gasPrice = '0x1'; // default gasPrice required in engine api
+        delete encodedTxWithFee.gasPrice;
       } else {
         encodedTxWithFee.gasPrice = toBigIntHex(
           new BigNumber(feeInfoValue.price as string).shiftedBy(
@@ -424,5 +558,232 @@ export default class Vault extends VaultBase {
       }
     }
     return Promise.resolve(encodedTxWithFee);
+  }
+
+  private async getNextNonce(
+    networkId: string,
+    dbAccount: DBAccount,
+  ): Promise<number> {
+    const onChainNonce =
+      (
+        await this.engine.providerManager.getAddresses(networkId, [
+          dbAccount.address,
+        ])
+      )[0]?.nonce ?? 0;
+
+    // TODO: Although 100 history items should be enough to cover all the
+    // pending transactions, we need to find a more reliable way.
+    const historyItems = await this.engine.getHistory(
+      networkId,
+      dbAccount.id,
+      undefined,
+      false,
+    );
+    const nextNonce = Math.max(
+      ...(await Promise.all(
+        historyItems
+          .filter((entry) => entry.status === HistoryEntryStatus.PENDING)
+          .map((historyItem) =>
+            EVMTxDecoder.getDecoder(this.engine)
+              .decode((historyItem as HistoryEntryTransaction).rawTx)
+              .then(({ nonce }) => (nonce ?? 0) + 1),
+          ),
+      )),
+      onChainNonce,
+    );
+
+    if (nextNonce - onChainNonce >= PENDING_QUEUE_MAX_LENGTH) {
+      throw new PendingQueueTooLong(PENDING_QUEUE_MAX_LENGTH);
+    }
+
+    return nextNonce;
+  }
+
+  async mmGetPublicKey(options: ISignCredentialOptions): Promise<string> {
+    const dbAccount = await this.getDbAccount();
+    if (dbAccount.id.startsWith('hd-') || dbAccount.id.startsWith('imported')) {
+      const keyring = this.keyring as KeyringSoftwareBase;
+      const { password } = options;
+      if (typeof password === 'undefined') {
+        throw new OneKeyInternalError('password required');
+      }
+      const { [dbAccount.address]: signer } = await keyring.getSigners(
+        password,
+        [dbAccount.address],
+      );
+      return (this.engineProvider as EthProvider).mmGetPublicKey(signer);
+    }
+    throw new NotImplemented(
+      'Only software keryings support getting encryption key.',
+    );
+  }
+
+  async mmDecrypt(
+    message: string,
+    options: ISignCredentialOptions,
+  ): Promise<string> {
+    const dbAccount = await this.getDbAccount();
+    if (dbAccount.id.startsWith('hd-') || dbAccount.id.startsWith('imported')) {
+      const keyring = this.keyring as KeyringSoftwareBase;
+      const { password } = options;
+      if (typeof password === 'undefined') {
+        throw new OneKeyInternalError('password required');
+      }
+      const { [dbAccount.address]: signer } = await keyring.getSigners(
+        password,
+        [dbAccount.address],
+      );
+      return (this.engineProvider as EthProvider).mmDecrypt(message, signer);
+    }
+    throw new NotImplemented('Only software keryings support mm decryption.');
+  }
+
+  async personalECRecover(message: string, signature: string): Promise<string> {
+    return (this.engineProvider as EthProvider).ecRecover(
+      { type: ETHMessageTypes.PERSONAL_SIGN, message },
+      signature,
+    );
+  }
+
+  override async getTokenAllowance(
+    tokenAddress: string,
+    spenderAddress: string,
+  ): Promise<BigNumber> {
+    const [dbAccount, token] = await Promise.all([
+      this.getDbAccount(),
+      this.engine.getOrAddToken(this.networkId, tokenAddress),
+    ]);
+
+    if (typeof token === 'undefined') {
+      // This will be catched by engine.
+      console.error(`Token not found: ${tokenAddress}`);
+      throw new Error();
+    }
+
+    // keccak256(Buffer.from('allowance(address,address)') => '0xdd62ed3e...'
+    const allowanceMethodID = '0xdd62ed3e';
+    const data = `${allowanceMethodID}${defaultAbiCoder
+      .encode(['address', 'address'], [dbAccount.address, spenderAddress])
+      .slice(2)}`;
+    const client = await this.getJsonRPCClient();
+    const rawAllowanceHex = await client.rpc.call('eth_call', [
+      { to: token.tokenIdOnNetwork, data },
+      'latest',
+    ]);
+    return new BigNumber(rawAllowanceHex as string).shiftedBy(-token.decimals);
+  }
+
+  async getExportedCredential(password: string): Promise<string> {
+    const dbAccount = await this.getDbAccount();
+    if (dbAccount.id.startsWith('hd-') || dbAccount.id.startsWith('imported')) {
+      const keyring = this.keyring as KeyringSoftwareBase;
+      const [encryptedPrivateKey] = Object.values(
+        await keyring.getPrivateKeys(password),
+      );
+      return `0x${decrypt(password, encryptedPrivateKey).toString('hex')}`;
+    }
+    throw new OneKeyInternalError(
+      'Only credential of HD or imported accounts can be exported',
+    );
+  }
+
+  // Chain only functionalities below.
+
+  async guessUserCreateInput(input: string): Promise<IUserInputGuessingResult> {
+    const ret = [];
+    if (
+      this.settings.importedAccountEnabled &&
+      /^(0x)?[0-9a-zA-Z]{64}$/.test(input)
+    ) {
+      ret.push(UserCreateInputCategory.PRIVATE_KEY);
+    }
+    if (
+      this.settings.watchingAccountEnabled &&
+      (await this.engineProvider.verifyAddress(input)).isValid
+    ) {
+      ret.push(UserCreateInputCategory.ADDRESS);
+    }
+    return Promise.resolve(ret);
+  }
+
+  override async proxyJsonRPCCall<T>(request: IJsonRpcRequest): Promise<T> {
+    const client = await this.getJsonRPCClient();
+    try {
+      return await client.rpc.call(
+        request.method,
+        request.params as Record<string, any> | Array<any>,
+      );
+    } catch (e) {
+      throw extractResponseError(e);
+    }
+  }
+
+  createClientFromURL(url: string): Geth {
+    return new Geth(url);
+  }
+
+  fetchTokenInfos(
+    tokenAddresses: string[],
+  ): Promise<Array<PartialTokenInfo | undefined>> {
+    return this.engine.providerManager.getTokenInfos(
+      this.networkId,
+      tokenAddresses,
+    );
+  }
+
+  override async updatePendingTxs(histories: Array<HistoryEntry>) {
+    const decoder = EVMTxDecoder.getDecoder(this.engine);
+    const decodedPendings = histories
+      .filter<HistoryEntryTransaction>(
+        (h): h is HistoryEntryTransaction => 'rawTx' in h,
+      )
+      .filter((h) => h.status === HistoryEntryStatus.PENDING)
+      .map(async (h) => ({
+        entry: h,
+        decodedItem: await decoder.decodeHistoryEntry(h),
+      }));
+
+    if (!decodedPendings.length) {
+      return {};
+    }
+
+    const pendings = await Promise.all(decodedPendings);
+
+    const updatedStatuses =
+      await this.engine.providerManager.getTransactionStatuses(
+        this.networkId,
+        pendings.map(({ decodedItem }) => decodedItem.txHash),
+      );
+
+    // TODO: handle different addresses.
+    const {
+      decodedItem: { fromAddress },
+    } = pendings[0];
+    const nonce = await getTxCount(fromAddress, this);
+
+    const updatedStatusMap: Record<string, HistoryEntryStatus> = {};
+    updatedStatuses.forEach((status, index) => {
+      const { entry, decodedItem } = pendings[index];
+      const { id } = entry;
+      const txNonce = decodedItem.nonce;
+      if (
+        status === TransactionStatus.NOT_FOUND ||
+        status === TransactionStatus.INVALID
+      ) {
+        if (!isNil(txNonce) && txNonce < nonce) {
+          updatedStatusMap[id] = HistoryEntryStatus.DROPPED;
+        }
+      } else if (status === TransactionStatus.CONFIRM_AND_SUCCESS) {
+        updatedStatusMap[id] = HistoryEntryStatus.SUCCESS;
+      } else if (status === TransactionStatus.CONFIRM_BUT_FAILED) {
+        updatedStatusMap[id] = HistoryEntryStatus.FAILED;
+      }
+    });
+
+    if (Object.keys(updatedStatusMap).length > 0) {
+      await this.engine.dbApi.updateHistoryEntryStatuses(updatedStatusMap);
+    }
+
+    return updatedStatusMap;
   }
 }

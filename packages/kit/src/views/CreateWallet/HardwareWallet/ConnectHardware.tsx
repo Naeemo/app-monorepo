@@ -3,7 +3,6 @@ import React, { FC, useCallback, useEffect, useState } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { useIntl } from 'react-intl';
 
-import isOnekeyDevice from '@onekeyhq/app/src/utils/OnekeyHardware';
 import {
   Box,
   Center,
@@ -20,6 +19,7 @@ import ClassicDeviceIcon from '@onekeyhq/components/img/deviceIcon_classic.png';
 import MiniDeviceIcon from '@onekeyhq/components/img/deviceIcon_mini.png';
 import PressableItem from '@onekeyhq/components/src/Pressable/PressableItem';
 import KeepDeviceAroundSource from '@onekeyhq/kit/assets/wallet/keep_device_close.png';
+import PermissionDialog from '@onekeyhq/kit/src/components/PermissionDialog/PermissionDialog';
 import {
   CreateWalletModalRoutes,
   CreateWalletRoutesParams,
@@ -30,22 +30,30 @@ import {
   RootRoutes,
   RootRoutesParams,
 } from '@onekeyhq/kit/src/routes/types';
-import Platform from '@onekeyhq/shared/src/platformEnv';
-
-import bleUtils, { BleDevice } from '../../../utils/ble/utils';
+import isOnekeyDevice, {
+  getDeviceType,
+} from '@onekeyhq/kit/src/utils/device/ble/OnekeyHardware';
+import { BleDevice } from '@onekeyhq/kit/src/utils/device/ble/utils';
+import deviceUtils, {
+  ScannedDevice,
+} from '@onekeyhq/kit/src/utils/device/deviceUtils';
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
+import {
+  IOneKeyDeviceFeatures,
+  IOneKeyDeviceType,
+} from '@onekeyhq/shared/types';
 
 type NavigationProps = ModalScreenProps<RootRoutesParams> &
   ModalScreenProps<CreateWalletRoutesParams>;
 
-type DeviceType = 'classic' | 'mini';
 export type Device = {
-  type: DeviceType;
+  type: IOneKeyDeviceType;
   name: string;
-  device: BleDevice;
+  device: ScannedDevice;
 };
 
 const getDeviceIcon = (
-  type: DeviceType,
+  type: IOneKeyDeviceType,
 ): import('react-native').ImageSourcePropType | undefined => {
   switch (type) {
     case 'classic':
@@ -63,6 +71,7 @@ const ConnectHardwareModal: FC = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [isConnectingDeviceId, setIsConnectingDeviceId] = useState('');
   const [devices, setDevices] = useState<Device[]>([]);
+  const [errorDialog, setErrorDialog] = useState(false);
 
   const isConnectedDeviceActivated = false;
   // Do connect device on desktop
@@ -91,7 +100,7 @@ const ConnectHardwareModal: FC = () => {
   useEffect(() => {
     if (isDevicePlugIn) {
       setTimeout(() => {
-        if (!Platform.isNative) {
+        if (!platformEnv.isNative) {
           navigateNext();
         }
       }, 3 * 1000);
@@ -99,34 +108,40 @@ const ConnectHardwareModal: FC = () => {
   }, [isDevicePlugIn, navigateNext]);
 
   const handleStopDevice = useCallback(() => {
-    if (!bleUtils) return;
+    if (!deviceUtils) return;
 
-    bleUtils.stopScan();
-  }, []);
-
-  useEffect(() => {
-    console.log('Start scanning');
-
-    return () => {
-      handleStopDevice();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    deviceUtils.stopScan();
   }, []);
 
   const handleScanDevice = useCallback(() => {
     // TODO: await to ask bluetooth permission
-    if (!bleUtils) return;
+    if (!deviceUtils) return;
     setIsSearching(true);
 
     const scanDevice: Device[] = [];
 
-    bleUtils.startDeviceScan((_device) => {
-      if (_device && isOnekeyDevice(_device)) {
-        if (!scanDevice.find((device) => device.device.id === _device.id)) {
+    deviceUtils.startDeviceScan((_device) => {
+      // @ts-expect-error
+      const isError = !!_device?.errorCode;
+      if (isError) {
+        setErrorDialog(true);
+        setIsSearching(false);
+        return;
+      }
+      const scannedBleDevice = _device as BleDevice;
+      if (
+        _device &&
+        isOnekeyDevice(scannedBleDevice.name, scannedBleDevice.id)
+      ) {
+        if (
+          !scanDevice.find((device) => device.device.id === scannedBleDevice.id)
+        ) {
           scanDevice.push({
-            type: 'classic' as DeviceType,
-            name: _device.name ?? '',
-            device: _device,
+            type: getDeviceType(
+              scannedBleDevice as unknown as IOneKeyDeviceFeatures,
+            ),
+            name: scannedBleDevice.name ?? '',
+            device: scannedBleDevice,
           });
 
           setDevices([...scanDevice]);
@@ -138,28 +153,79 @@ const ConnectHardwareModal: FC = () => {
     // Show device options when available
   }, []);
 
-  const handleConnectDeviceWithDevice = (device: Device) => {
-    console.log('Connecting to device', device);
+  useEffect(() => {
+    if (platformEnv.isRuntimeBrowser) handleScanDevice();
+    return () => {
+      handleStopDevice();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    if (!bleUtils || !device) return;
+  const handleConnectDeviceWithDevice = useCallback(
+    (device: Device) => {
+      if (!deviceUtils || !device) return;
 
-    // bleUtils.stopScan();
-    // setIsSearching(false);
+      // bleUtils.stopScan();
+      // setIsSearching(false);
 
-    setIsConnectingDeviceId(device.device.id);
-    bleUtils.connect(device.device.id).then(() => {
-      setIsConnectingDeviceId('');
-      navigation.navigate(RootRoutes.Modal, {
-        screen: ModalRoutes.CreateWallet,
-        params: {
-          screen: CreateWalletModalRoutes.DeviceStatusCheckModal,
+      setIsConnectingDeviceId(device.device.id);
+      deviceUtils.connect(device.device.id, device.type).then(() => {
+        setIsConnectingDeviceId('');
+        navigation.navigate(RootRoutes.Modal, {
+          screen: ModalRoutes.CreateWallet,
           params: {
-            device,
+            screen: CreateWalletModalRoutes.DeviceStatusCheckModal,
+            params: {
+              device,
+            },
           },
-        },
+        });
       });
-    });
-  };
+    },
+    [navigation],
+  );
+
+  const renderDevices = useCallback(() => {
+    if (!devices?.length) return null;
+    return (
+      <VStack space={4} w="full">
+        <Typography.Body2 color="text-subdued" textAlign="center">
+          {intl.formatMessage({ id: 'modal__looking_for_devices_result' })}
+        </Typography.Body2>
+        {devices.map((device) => (
+          <PressableItem
+            p="4"
+            key={device?.device.id}
+            bg="surface-default"
+            borderRadius="12px"
+            flexDirection="row"
+            alignItems="center"
+            justifyContent="space-between"
+            onPress={() => {
+              handleConnectDeviceWithDevice(device);
+            }}
+          >
+            <HStack space={3} alignItems="center">
+              {/* TODO: Different type of icon */}
+              <Image
+                source={getDeviceIcon(device.type)}
+                width={6}
+                height={36}
+              />
+              <Typography.Body1>{device.name}</Typography.Body1>
+            </HStack>
+
+            <HStack space={3} alignItems="center">
+              {isConnectingDeviceId === device.device.id && (
+                <Spinner size="sm" />
+              )}
+              <Icon name="ChevronRightOutline" />
+            </HStack>
+          </PressableItem>
+        ))}
+      </VStack>
+    );
+  }, [devices, handleConnectDeviceWithDevice, isConnectingDeviceId, intl]);
 
   // Mobile Connect Screen
   const renderConnectScreen = () => {
@@ -201,52 +267,21 @@ const ConnectHardwareModal: FC = () => {
           </Typography.Body1>
         </VStack>
 
-        {!!devices && (
-          <VStack space={4} w="full">
-            <Typography.Body2 color="text-subdued" textAlign="center">
-              {intl.formatMessage({ id: 'modal__looking_for_devices_result' })}
-            </Typography.Body2>
-
-            {/* Fake devices */}
-            {devices.map((device) => (
-              <PressableItem
-                p="4"
-                key={device?.device.id}
-                bg="surface-default"
-                borderRadius="12px"
-                flexDirection="row"
-                alignItems="center"
-                justifyContent="space-between"
-                onPress={() => {
-                  handleConnectDeviceWithDevice(device);
-                }}
-              >
-                <HStack space={3} alignItems="center">
-                  {/* TODO: Different type of icon */}
-                  <Image
-                    source={getDeviceIcon(device.type)}
-                    width={6}
-                    height={36}
-                  />
-                  <Typography.Body1>{device.name}</Typography.Body1>
-                </HStack>
-
-                <HStack space={3} alignItems="center">
-                  {isConnectingDeviceId === device.device.id && (
-                    <Spinner size="sm" />
-                  )}
-                  <Icon name="ChevronRightOutline" />
-                </HStack>
-              </PressableItem>
-            ))}
-          </VStack>
-        )}
+        {renderDevices()}
       </VStack>
     );
   };
 
-  const content = Platform.isNative ? (
-    <Center>{renderConnectScreen()}</Center>
+  const content = platformEnv.isNative ? (
+    <>
+      {errorDialog ? (
+        <PermissionDialog
+          type="bluetooth"
+          onClose={() => navigation.goBack()}
+        />
+      ) : null}
+      <Center>{renderConnectScreen()}</Center>
+    </>
   ) : (
     <VStack space={8} alignItems="center">
       <Box>
@@ -259,8 +294,9 @@ const ConnectHardwareModal: FC = () => {
       </Box>
 
       <Typography.DisplayMedium>
-        {intl.formatMessage({ id: 'modal__connect_and_unlock_device' })}
+        {intl.formatMessage({ id: 'modal__connect_your_device' })}
       </Typography.DisplayMedium>
+      {renderDevices()}
     </VStack>
   );
 
@@ -268,9 +304,14 @@ const ConnectHardwareModal: FC = () => {
     <Modal
       scrollViewProps={{
         children: content,
+        contentContainerStyle: {
+          height: '100%',
+          justifyContent: 'center',
+          paddingBottom: 24,
+        },
       }}
-      hidePrimaryAction={!Platform.isNative}
-      footer={!Platform.isNative || isSearching ? null : undefined}
+      hidePrimaryAction={!platformEnv.isNative}
+      footer={!platformEnv.isNative || isSearching ? null : undefined}
       primaryActionTranslationId="action__connect_device"
       onPrimaryActionPress={handleScanDevice}
       hideSecondaryAction

@@ -22,25 +22,6 @@ export function throwCrossError(msg: string, ...args: any) {
   throw new Error(msg);
 }
 
-export function toPlainErrorObject(error: {
-  name?: any;
-  code?: any;
-  data?: any;
-  message?: any;
-  stack?: any;
-}) {
-  return {
-    name: error.name,
-    code: error.code,
-    data: error.data,
-    message: error.message,
-    // Crash in Android hermes engine (error.stack serialize fail, only if Web3Errors object)
-    stack: platformEnv.isAndroid
-      ? 'Access error.stack failed in Android hermes engine: unable to serialize, circular reference is too complex to analyze'
-      : error.stack,
-  };
-}
-
 export function isSerializable(obj: any) {
   if (
     isUndefined(obj) ||
@@ -194,43 +175,61 @@ export async function waitForDataLoaded({
   data,
   wait = 600,
   logName,
+  timeout = 0,
 }: {
   data: (...args: any) => any;
   wait?: number;
   logName: string;
+  timeout?: number;
 }) {
-  const getDataArrFunc = ([] as ((...args: any) => any)[]).concat(data);
-  // TODO timeout break
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    let isAllLoaded = true;
+  return new Promise<void>((resolve, reject) => {
+    (async () => {
+      let timeoutReject = false;
+      let timer: any = null;
+      const getDataArrFunc = ([] as ((...args: any) => any)[]).concat(data);
+      if (timeout) {
+        timer = setTimeout(() => {
+          timeoutReject = true;
+        }, timeout);
+      }
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        let isAllLoaded = true;
 
-    if (logName) {
-      console.log(`waitForDataLoaded: ${logName}`);
-    }
-
-    await Promise.all(
-      getDataArrFunc.map(async (getData) => {
-        const d = await getData();
-        if (d === false) {
-          isAllLoaded = false;
+        if (logName) {
+          console.log(`waitForDataLoaded: ${logName}`);
         }
 
-        if (isNil(d)) {
-          isAllLoaded = false;
-        }
+        await Promise.all(
+          getDataArrFunc.map(async (getData) => {
+            const d = await getData();
+            if (d === false) {
+              isAllLoaded = false;
+            }
 
-        if (isEmpty(d)) {
-          if (isPlainObject(d) || isArray(d)) {
-            isAllLoaded = false;
-          }
-        }
-      }),
-    );
+            if (isNil(d)) {
+              isAllLoaded = false;
+            }
 
-    if (isAllLoaded) {
-      break;
-    }
-    await delay(wait);
-  }
+            if (isEmpty(d)) {
+              if (isPlainObject(d) || isArray(d)) {
+                isAllLoaded = false;
+              }
+            }
+          }),
+        );
+
+        if (isAllLoaded || timeoutReject) {
+          break;
+        }
+        await delay(wait);
+      }
+      clearTimeout(timer);
+      if (timeoutReject) {
+        reject(new Error(`waitForDataLoaded: ${logName ?? ''} timeout`));
+      } else {
+        resolve();
+      }
+    })();
+  });
 }

@@ -2,6 +2,7 @@ import React, {
   ComponentProps,
   FC,
   useCallback,
+  useEffect,
   useRef,
   useState,
 } from 'react';
@@ -11,9 +12,10 @@ import { useIntl } from 'react-intl';
 import { Box, HStack, IconButton, Input } from '@onekeyhq/components';
 import type { ICON_NAMES } from '@onekeyhq/components';
 
-import { SearchView } from '../Search/SearchView';
+import SearchView from '../Search/SearchView';
 
 import type { ExplorerViewProps } from '..';
+import type { MatchDAppItemType } from '../Search/useSearchHistories';
 
 type BrowserURLInputProps = {
   onClear?: () => void;
@@ -54,21 +56,58 @@ const BrowserURLInput = React.forwardRef<typeof Input, BrowserURLInputProps>(
 
 BrowserURLInput.displayName = 'BrowserURLInput';
 
+export type KeyEventType = 'ArrowUp' | 'ArrowDown';
+
 const Desktop: FC<ExplorerViewProps> = ({
   searchContent,
   onSearchContentChange,
   onSearchSubmitEditing,
   explorerContent,
+  loading,
+  canGoBack,
+  canGoForward,
   onGoBack,
   onNext,
   onRefresh,
+  onStopLoading,
   moreView,
   showExplorerBar,
 }) => {
   const intl = useIntl();
 
   const [historyVisible, setHistoryVisible] = React.useState(false);
+  const [httpSafeState, setHttpSafeState] = useState<ICON_NAMES>(
+    'ExclamationCircleSolid',
+  );
+
   const searchBar = useRef<any>(null);
+  // Todo Ref Type
+  const searchView = useRef<any>(null);
+
+  const onKeyEvent = (event: KeyEventType) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-member-access
+    searchView?.current?.onKeyPress?.(event);
+  };
+
+  useEffect(() => {
+    try {
+      if (!searchContent || !searchContent?.searchContent) {
+        setHttpSafeState('SearchCircleSolid');
+        return;
+      }
+
+      const url = new URL(searchContent?.searchContent ?? '');
+      if (url.protocol === 'https:') {
+        setHttpSafeState('LockClosedSolid');
+      } else if (url.protocol === 'http:') {
+        setHttpSafeState('ExclamationCircleSolid');
+      } else {
+        setHttpSafeState('SearchCircleSolid');
+      }
+    } catch (e) {
+      setHttpSafeState('SearchCircleSolid');
+    }
+  }, [searchContent]);
 
   return (
     <Box flex="1" zIndex={3}>
@@ -85,17 +124,19 @@ const Desktop: FC<ExplorerViewProps> = ({
             <IconButton
               type="plain"
               name="ArrowLeftOutline"
+              disabled={!canGoBack}
               onPress={onGoBack}
             />
             <IconButton
               type="plain"
               name="ArrowRightOutline"
+              disabled={!canGoForward}
               onPress={onNext}
             />
             <IconButton
               type="plain"
-              name="RefreshOutline"
-              onPress={onRefresh}
+              name={loading ? 'CloseOutline' : 'RefreshOutline'}
+              onPress={loading ? onStopLoading : onRefresh}
             />
 
             <BrowserURLInput
@@ -105,14 +146,30 @@ const Desktop: FC<ExplorerViewProps> = ({
               placeholder={intl.formatMessage({
                 id: 'content__search_or_enter_dapp_url',
               })}
-              customLeftIcon="LockClosedSolid"
+              customLeftIcon={httpSafeState}
               size="base"
-              value={searchContent}
-              onClear={() => onSearchContentChange?.('')}
-              onChangeText={onSearchContentChange}
+              value={searchContent?.searchContent}
+              onClear={() => onSearchContentChange?.({ searchContent: '' })}
+              onChangeText={(text) =>
+                onSearchContentChange?.({ searchContent: text })
+              }
               onSubmitEditing={(event) => {
-                onSearchContentChange?.(event.nativeEvent.text);
-                onSearchSubmitEditing?.(event.nativeEvent.text);
+                if (searchContent?.dapp) {
+                  onSearchSubmitEditing?.(searchContent.dapp);
+                } else {
+                  onSearchContentChange?.({
+                    searchContent: event.nativeEvent.text,
+                  });
+                  onSearchSubmitEditing?.(event.nativeEvent.text);
+                }
+              }}
+              onKeyPress={(event) => {
+                const { key } = event.nativeEvent;
+                if (key === 'ArrowUp' || key === 'ArrowDown') {
+                  onKeyEvent?.(key);
+                  // 阻断 上键、下键 事件传递
+                  event.preventDefault();
+                }
               }}
               onFocus={() => {
                 setHistoryVisible(true);
@@ -132,11 +189,26 @@ const Desktop: FC<ExplorerViewProps> = ({
           </HStack>
           {moreView}
           <SearchView
+            ref={searchView}
             visible={historyVisible}
             onVisibleChange={setHistoryVisible}
-            searchContent={searchContent ?? ''}
-            onSelectorItem={(item) => {
+            // onSearchContentChange={onSearchContentChange}
+            searchContent={searchContent}
+            onSelectorItem={(item: MatchDAppItemType) => {
               onSearchSubmitEditing?.(item);
+            }}
+            onHoverItem={(item: MatchDAppItemType) => {
+              let url;
+              if (item.dapp) {
+                url = item.dapp.url;
+              } else if (item.webSite) {
+                url = item.webSite.url;
+              }
+              if (url)
+                onSearchContentChange?.({
+                  searchContent: url,
+                  dapp: item,
+                });
             }}
             relativeComponent={searchBar.current}
           />

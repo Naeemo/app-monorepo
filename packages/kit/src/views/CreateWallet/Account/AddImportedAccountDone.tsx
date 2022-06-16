@@ -1,18 +1,21 @@
 import React, { FC, useEffect } from 'react';
 
-import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import { RouteProp, useRoute } from '@react-navigation/native';
 import { useIntl } from 'react-intl';
 
-import { Center, Modal, Spinner } from '@onekeyhq/components';
+import { Center, Modal, Spinner, useToast } from '@onekeyhq/components';
 import { LocaleIds } from '@onekeyhq/components/src/locale';
 import backgroundApiProxy from '@onekeyhq/kit/src/background/instance/backgroundApiProxy';
-import Protected from '@onekeyhq/kit/src/components/Protected';
+import Protected, {
+  ValidationFields,
+} from '@onekeyhq/kit/src/components/Protected';
 import {
   CreateWalletModalRoutes,
   CreateWalletRoutesParams,
 } from '@onekeyhq/kit/src/routes/Modal/CreateWallet';
+import platformEnv from '@onekeyhq/shared/src/platformEnv';
 
-import { useDrawer, useToast } from '../../../hooks';
+import { useNavigation, useNavigationActions } from '../../../hooks';
 import { setEnableLocalAuthentication } from '../../../store/reducers/settings';
 import { savePassword } from '../../../utils/localAuthentication';
 
@@ -38,8 +41,7 @@ const Done: FC<DoneProps> = ({
 }) => {
   const intl = useIntl();
   const toast = useToast();
-  const { closeDrawer } = useDrawer();
-  const navigation = useNavigation();
+  const { closeDrawer, resetToRoot } = useNavigationActions();
   useEffect(() => {
     async function main() {
       try {
@@ -60,8 +62,10 @@ const Done: FC<DoneProps> = ({
         });
       }
       closeDrawer();
-      const inst = navigation.getParent() || navigation;
-      inst.goBack();
+      resetToRoot();
+      if (platformEnv.isExtensionUiStandaloneWindow) {
+        window?.close?.();
+      }
     }
     main();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -75,10 +79,18 @@ const Done: FC<DoneProps> = ({
 
 export const AddImportedAccountDone = () => {
   const route = useRoute<RouteProps>();
+  const navigation = useNavigation();
   const { privatekey, name, networkId } = route.params ?? {};
+  useEffect(() => {
+    navigation.setOptions({ gestureEnabled: false });
+  }, [navigation]);
   return (
-    <Modal footer={null}>
-      <Protected skipSavePassword>
+    <Modal footer={null} headerShown={false}>
+      <Protected
+        walletId={null}
+        skipSavePassword
+        field={ValidationFields.Account}
+      >
         {(password, { withEnableAuthentication }) => (
           <Done
             withEnableAuthentication={withEnableAuthentication}
